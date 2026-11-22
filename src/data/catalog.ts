@@ -541,7 +541,7 @@ export const GAME_MODES: Record<GameModeId, GameModeDef> = {
     badge: 'CLASSIC 20',
     tagline: 'The signature Mountain View Googleplex survival showdown.',
     description:
-      'Drop unarmed from 135m across the full 3× Mountain View Googleplex, loot Tier 1–3 chests and 3 aerial Supply Drops, and outlast 19 autonomous Product AIs across 5 closing storm phases.',
+      'Drop unarmed from 135m across the full 3× Mountain View Googleplex, loot Tier 1–3 chests and 3 aerial Supply Drops, and outlast 19 AI opponents across 5 closing storm phases.',
     accentCss: '#4285f4',
     totalCombatants: 20,
     startMana: 40,
@@ -550,7 +550,7 @@ export const GAME_MODES: Record<GameModeId, GameModeDef> = {
     stormEnabled: true,
     stormPaceMult: 1.0,
     initialStormRadius: 365,
-    highlights: ['20 Product AIs', 'Standard 5-Phase Storm', 'Tier 1–3 Loot Chests', '3 Supply Drops'],
+    highlights: ['20 Characters', 'Standard 5-Phase Storm', 'Tier 1–3 Loot Chests', '3 Supply Drops'],
   },
   blitz: {
     id: 'blitz',
@@ -568,7 +568,7 @@ export const GAME_MODES: Record<GameModeId, GameModeDef> = {
     stormPaceMult: 0.55,
     initialStormRadius: 270,
     minChestTier: 2,
-    highlights: ['16 Product AIs', '1.8× Faster Storm', 'Tier 2–3 Upgraded Chests', '+65% Mana Regen'],
+    highlights: ['16 Characters', '1.8× Faster Storm', 'Tier 2–3 Upgraded Chests', '+65% Mana Regen'],
   },
   sniper_showdown: {
     id: 'sniper_showdown',
@@ -586,7 +586,7 @@ export const GAME_MODES: Record<GameModeId, GameModeDef> = {
     stormPaceMult: 0.82,
     initialStormRadius: 330,
     forceWeaponId: 'longbow_308',
-    highlights: ['Longbow .308 Exclusive', '16 Product AIs', 'Impulse & Shield Loot', '2.0× Headshot Crits'],
+    highlights: ['Longbow .308 Exclusive', '16 Characters', 'Impulse & Shield Loot', '2.0× Headshot Crits'],
   },
   campus_practice: {
     id: 'campus_practice',

@@ -173,7 +173,7 @@ const modeGrid = document.getElementById('mode-grid')!;
 const btnModesBack = document.getElementById('btn-modes-back') as HTMLButtonElement;
 const btnModesPlay = document.getElementById('btn-modes-play') as HTMLButtonElement;
 
-// Page 3: Product AIs DOM
+// Page 3: Characters DOM
 const heroGrid = document.getElementById('hero-grid')!;
 const detailHeroIcon = document.getElementById('detail-hero-icon')!;
 const detailHeroName = document.getElementById('detail-hero-name')!;
@@ -855,7 +855,7 @@ function closeSettingsToPause(): void {
   pauseOverlay.classList.remove('hidden');
 }
 
-// ==================== HOME, PLAY MODES & PRODUCT AI UI RENDERING ====================
+// ==================== HOME, PLAY MODES & CHARACTER UI RENDERING ====================
 function updatePlayButtons(): void {
   const mode = GAME_MODES[selectedModeId] ?? GAME_MODES.battle_royale;
   const hero = HERO_MAP[selectedHeroId];
@@ -981,7 +981,7 @@ function updateHeroDetails(): void {
   detailUltName.textContent = `${h.ultimate.name} (${h.ultimate.subtitle})`;
   detailUltDesc.textContent = h.ultimate.description;
   detailUltCost.textContent = `${h.ultimate.manaCost} Mana · ${h.ultimate.cooldown}s CD`;
-  previewTag.textContent = `${h.personaName} · Workspace Product AI`;
+  previewTag.textContent = `${h.personaName} · Workspace Character`;
   previewRole.textContent = h.role;
   previewShowcasePill.textContent = lobbyWeapon
     ? `✦ ${h.lobbyAnimLabel} · ${lobbyWeapon.skinName} (${lobbyWeapon.name})`
@@ -2175,7 +2175,7 @@ window.addEventListener('keydown', (e) => {
       targetEl instanceof HTMLSelectElement;
     if (isFormInput) return;
 
-    // Keys 1-6 preview Product AIs on the Product AIs page
+    // Keys 1-6 preview Characters on the Characters page
     if (activeMenuPage === 'characters') {
       const idx = Number(e.key) - 1;
       if (idx >= 0 && idx < PRODUCT_HEROES.length) {
@@ -2186,7 +2186,7 @@ window.addEventListener('keydown', (e) => {
       }
     }
 
-    // Enter launches match from Home / Modes / Product AIs (NEVER on Settings or when activating a focused button)
+    // Enter launches match from Home / Modes / Characters (NEVER on Settings or when activating a focused button)
     if (e.key === 'Enter' && assetsReady && activeMenuPage !== 'settings' && settingsReturnTarget !== 'pause') {
       const activeEl = document.activeElement;
       const isInteractiveFocus =

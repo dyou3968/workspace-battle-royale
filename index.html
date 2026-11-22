@@ -3,17 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Workspace Royale — Google Workspace Product AI Battle Royale</title>
+    <title>Workspace Royale — Google Workspace Battle Royale</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta
       name="description"
-      content="Workspace Royale — 3D Google Workspace Product Icon AI Battle Royale across the 3× Mountain View Googleplex campus. Drop in with 6 Product AIs, 5 bespoke skinned weapons, and 4 play modes."
+      content="Workspace Royale — 3D Google Workspace Battle Royale across the 3× Mountain View Googleplex campus. Drop in with 6 Characters, 5 bespoke skinned weapons, and 4 play modes."
     />
     <meta name="theme-color" content="#1A73E8" />
-    <meta property="og:title" content="Workspace Royale — Google Workspace Product AI Battle Royale" />
+    <meta property="og:title" content="Workspace Royale — Google Workspace Battle Royale" />
     <meta
       property="og:description"
-      content="3D Battle Royale across the 3× Mountain View Googleplex featuring 6 embodied Google Workspace Product Icon AIs, bespoke skinned weapons, Tier 1–3 loot chests, and 4 play modes."
+      content="3D Battle Royale across the 3× Mountain View Googleplex featuring 6 playable Google Workspace Characters, bespoke skinned weapons, Tier 1–3 loot chests, and 4 play modes."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://workspace-battle-royale.davidyou.com" />
@@ -42,7 +42,7 @@
               </span>
               <div class="splash-preload-titles">
                 <div class="splash-preload-title">Workspace Royale</div>
-                <div class="splash-preload-sub">Google Workspace Product AI Battle Royale</div>
+                <div class="splash-preload-sub">Google Workspace Battle Royale</div>
               </div>
             </div>
             <div class="splash-preload-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="splash-preload-progressbar">
@@ -128,11 +128,11 @@
                 <span class="dot red"></span>
                 <span class="dot yellow"></span>
                 <span class="dot green"></span>
-                <span>Google Workspace Product AI Royale</span>
+                <span>Google Workspace Royale</span>
               </div>
               <h1 class="splash-cta-title">Ready to Drop In?</h1>
               <p class="splash-cta-desc">
-                Choose your Play Mode, Product AI, and Settings — or jump straight into Battle Royale.
+                Choose your Play Mode, Character, and Settings — or jump straight into Battle Royale.
               </p>
               <div class="splash-cta-actions">
                 <button type="button" id="btn-splash-start" class="btn-primary splash-btn-start" disabled>
@@ -192,7 +192,7 @@
                   <circle cx="10" cy="6.8" r="3.2" />
                   <path d="M4.2 16.5C5 13.6 7.2 12.2 10 12.2C12.8 12.2 15 13.6 15.8 16.5" />
                 </svg>
-                <span>Product AIs</span>
+                <span>Characters</span>
               </button>
               <button type="button" class="menu-tab" data-page="settings">
                 <svg class="tab-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -271,10 +271,10 @@
                 <div class="home-stage-col">
                   <div class="showcase-card home-showcase-card">
                     <div class="showcase-slot home-showcase-slot" id="home-showcase-slot">
-                      <!-- Single Live WebGL 3D Turntable (reparented cleanly between Home & Product AIs) -->
+                      <!-- Single Live WebGL 3D Turntable (reparented cleanly between Home & Characters) -->
                       <div class="preview-stage" id="preview-stage">
                         <canvas id="hero-preview-canvas" width="600" height="440"></canvas>
-                        <div class="preview-tag" id="preview-tag">Gmail AI · Workspace Product AI</div>
+                        <div class="preview-tag" id="preview-tag">Gmail AI · Workspace Character</div>
                         <div class="preview-role" id="preview-role">Autonomous Inbox Striker AI</div>
                         <div class="preview-showcase-pill" id="preview-showcase-pill">✦ Tactical Sweep · Arctic Apex (Vanguard M4)</div>
                         <div class="preview-controls">
@@ -290,7 +290,7 @@
                         <div class="home-strip-ult" id="home-strip-ult-name">Ultimate [Q]: Reply-All Barrage</div>
                       </div>
                       <button type="button" id="btn-home-customize" class="btn-tonal btn-sm">
-                        Customize AI
+                        Change Character
                       </button>
                     </div>
                   </div>
@@ -333,12 +333,12 @@
                       <span class="selector-chevron" aria-hidden="true">›</span>
                     </button>
 
-                    <!-- 2. Product AI Selector Row -->
+                    <!-- 2. Character Selector Row -->
                     <button type="button" id="home-card-hero" class="home-selector-row">
                       <div class="ws-product-tile home-selector-icon" id="home-hero-badge"></div>
                       <div class="selector-body">
                         <div class="selector-kicker-row">
-                          <span class="selector-kicker">Product AI</span>
+                          <span class="selector-kicker">Character</span>
                         </div>
                         <div class="selector-title" id="home-hero-name">Gmail AI</div>
                         <div class="selector-desc" id="home-hero-meta">
@@ -400,19 +400,19 @@
               </div>
             </section>
 
-            <!-- ==================== PAGE 3: PRODUCT AIs (ROSTER GALLERY) ==================== -->
+            <!-- ==================== PAGE 3: CHARACTERS (ROSTER GALLERY) ==================== -->
             <section class="menu-page hidden" id="page-characters" data-page-view="characters">
               <div class="characters-layout">
                 <!-- Left (~46%): 2x3 Roster Gallery (Zero settings panels) -->
                 <div class="characters-left">
                   <div class="characters-header">
-                    <h2>Workspace Product AIs</h2>
+                    <h2>Characters</h2>
                     <p class="characters-sub">Shared base stats · Unique Ultimate [Q]</p>
                   </div>
                   <div class="hero-grid" id="hero-grid"></div>
                   <div class="characters-keytip">
                     <span class="ws-keycap keycap-mini">1–6</span>
-                    <span>Preview Product AIs</span>
+                    <span>Preview Characters</span>
                     <span class="keytip-sep">·</span>
                     <span>Drag 3D showcase to inspect 360°</span>
                   </div>
@@ -526,7 +526,7 @@
                       <div class="setting-row-head">
                         <div class="setting-label">Bot Intelligence</div>
                         <div class="setting-sub">
-                          Select the skill tier of autonomous Workspace Product AI rivals across the campus.
+                          Select the skill tier of autonomous AI rivals across the campus.
                         </div>
                       </div>
 
@@ -1100,14 +1100,14 @@
         <div class="modal-card gameover-card">
           <div class="placement-badge is-victory" id="go-placement">#1 / 20</div>
           <h2 id="go-title">Victory Royale!</h2>
-          <p id="go-subtitle">You outlasted every rival Product AI at the Googleplex.</p>
+          <p id="go-subtitle">You outlasted every rival at the Googleplex.</p>
           <div class="summary-stats summary-stats-7">
             <div class="sum-stat sum-span-4">
               <span class="sum-label">Play Mode</span>
               <span class="sum-val" id="go-mode">Battle Royale</span>
             </div>
             <div class="sum-stat sum-span-4">
-              <span class="sum-label">Product AI</span>
+              <span class="sum-label">Character</span>
               <span class="sum-val" id="go-hero">Gmail AI</span>
             </div>
             <div class="sum-stat sum-span-4">
@@ -1133,7 +1133,7 @@
           </div>
           <div class="modal-actions modal-actions-3">
             <button type="button" id="btn-play-again" class="btn-primary">Drop Again</button>
-            <button type="button" id="btn-change-hero" class="btn-tonal">Change AI</button>
+            <button type="button" id="btn-change-hero" class="btn-tonal">Change Character</button>
             <button type="button" id="btn-gameover-home" class="btn-outlined">Home</button>
           </div>
         </div>
