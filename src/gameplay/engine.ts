@@ -452,6 +452,7 @@ export class WorkspaceRoyaleEngine {
   private mouseRightDown = false;
   private crouchToggled = false;
   private sprintLatchedOnReload = false;
+  private sprintLatchedOnChannel = false;
   private pointerLocked = false;
 
   // Graphics Quality, Telemetry, Full Tactical Map & Waypoint State
@@ -686,6 +687,7 @@ export class WorkspaceRoyaleEngine {
       this.mouseRightDown = false;
       this.keys.clear();
       this.sprintLatchedOnReload = false;
+      this.sprintLatchedOnChannel = false;
       if (document.pointerLockElement === this.renderer.domElement) {
         document.exitPointerLock();
       }
@@ -741,6 +743,7 @@ export class WorkspaceRoyaleEngine {
     this.mouseLeftDown = false;
     this.mouseRightDown = false;
     this.sprintLatchedOnReload = false;
+    this.sprintLatchedOnChannel = false;
     this.keys.clear();
     this.audio.setGliderWind(false);
     if (document.pointerLockElement === this.renderer.domElement) {
@@ -772,6 +775,7 @@ export class WorkspaceRoyaleEngine {
     this.unarmedHintCooldown = 0;
     this.crouchToggled = false;
     this.sprintLatchedOnReload = false;
+    this.sprintLatchedOnChannel = false;
     this.mapOpen = false;
     this.waypoint = null;
     this.visibleChestCount = 0;
@@ -1878,8 +1882,9 @@ export class WorkspaceRoyaleEngine {
     // ADS: Right-Click while wielding weapon and not reloading/channeling
     p.isAds = this.mouseRightDown && activeWeapon !== null && !p.isReloading && !p.channel;
 
-    // Sprint cancels crouch, active channel & reload (unless Shift was already held when reload began)
-    const canTriggerSprint = shiftHeld && fInput > 0 && !p.isAds && !this.sprintLatchedOnReload;
+    // Sprint cancels crouch, active channel & reload (unless Shift was already held when reload or channel began)
+    const canTriggerSprint =
+      shiftHeld && fInput > 0 && !p.isAds && !this.sprintLatchedOnReload && !this.sprintLatchedOnChannel;
     if (canTriggerSprint) {
       this.crouchToggled = false;
       if (p.channel) this.cancelChannel(p);
@@ -1888,9 +1893,13 @@ export class WorkspaceRoyaleEngine {
     if (!p.isReloading && !shiftHeld) {
       this.sprintLatchedOnReload = false;
     }
+    if (!p.channel && !shiftHeld) {
+      this.sprintLatchedOnChannel = false;
+    }
 
-    p.crouching = !canTriggerSprint && (this.crouchToggled || ctrlHeld);
-    p.sprinting = canTriggerSprint && !p.crouching && !p.isReloading;
+    const healCrouching = this.isHealOrShieldChannel(p.channel);
+    p.crouching = healCrouching || (!canTriggerSprint && (this.crouchToggled || ctrlHeld));
+    p.sprinting = canTriggerSprint && !p.crouching && !p.isReloading && !p.channel;
 
     // Movement speed
     let baseSpeed: number = GAME_CONSTANTS.WALK_SPEED;
@@ -2087,7 +2096,8 @@ export class WorkspaceRoyaleEngine {
 
     // Smooth yaw turning toward aim target
     b.yaw = this.lerpAngle(b.yaw, decision.aimYaw, Math.min(1, dt * 11));
-    b.crouching = decision.crouch && (!decision.sprint || b.isReloading);
+    const botHealCrouching = this.isHealOrShieldChannel(b.channel);
+    b.crouching = botHealCrouching || (decision.crouch && (!decision.sprint || b.isReloading));
     b.sprinting = decision.sprint && !b.crouching && !b.channel && !b.isReloading;
     const botActiveSlot = b.slots[b.activeSlot];
     b.isAds =
@@ -2869,6 +2879,9 @@ export class WorkspaceRoyaleEngine {
     const aliveBefore = this.combatants.filter((c) => c.alive).length;
     victim.alive = false;
     victim.channel = null;
+    if (victim.isPlayer) {
+      this.sprintLatchedOnChannel = false;
+    }
     victim.sprinting = false;
     this.cancelReload(victim);
     victim.hero.root.visible = false;
@@ -2949,6 +2962,7 @@ export class WorkspaceRoyaleEngine {
     this.mouseLeftDown = false;
     this.mouseRightDown = false;
     this.sprintLatchedOnReload = false;
+    this.sprintLatchedOnChannel = false;
     this.keys.clear();
     this.audio.setGliderWind(false);
     if (document.pointerLockElement === this.renderer.domElement) {
@@ -3410,6 +3424,16 @@ export class WorkspaceRoyaleEngine {
   // UTILITIES, CONSUMABLE CHANNELING, HARD-LIGHT COVER & LOOT
   // =========================================================================
 
+  private isHealOrShieldItem(itemId: UtilityItemId | undefined): boolean {
+    return itemId === 'shield_cell' || itemId === 'shield_jug' || itemId === 'medkit';
+  }
+
+  private isHealOrShieldChannel(channel: ActiveChannel | null): boolean {
+    return Boolean(
+      channel && channel.kind === 'consumable' && this.isHealOrShieldItem(channel.itemId)
+    );
+  }
+
   private tryUseActiveItem(c: Combatant): void {
     if (!c.alive || c.skyDropping || c.channel) return;
     const slot = c.slots[c.activeSlot];
@@ -3467,6 +3491,12 @@ export class WorkspaceRoyaleEngine {
     this.cancelReload(c);
     c.sprinting = false;
     c.isAds = false;
+    if (this.isHealOrShieldItem(itemId)) {
+      c.crouching = true;
+    }
+    if (c.isPlayer && (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'))) {
+      this.sprintLatchedOnChannel = true;
+    }
     c.channel = {
       kind: 'consumable',
       label: `Using ${def.name}...`,
@@ -3484,6 +3514,9 @@ export class WorkspaceRoyaleEngine {
   private cancelChannel(c: Combatant, notice?: string): void {
     if (!c.channel) return;
     c.channel = null;
+    if (c.isPlayer) {
+      this.sprintLatchedOnChannel = false;
+    }
     if (notice && c.isPlayer) {
       this.callbacks.onAnnouncement('CHANNEL CANCELED', notice);
     }
@@ -3493,6 +3526,9 @@ export class WorkspaceRoyaleEngine {
     const ch = c.channel;
     if (!ch) return;
     c.channel = null;
+    if (c.isPlayer) {
+      this.sprintLatchedOnChannel = false;
+    }
 
     if (ch.kind === 'supply_drop' && ch.supplyDropId) {
       const sd = this.supplyDrops.find((d) => d.id === ch.supplyDropId);
@@ -4186,7 +4222,10 @@ export class WorkspaceRoyaleEngine {
     // 2. Dynamic speed-matched stride (timeScale) across both unarmed & armed locomotion clips
     const runScale = THREE.MathUtils.clamp(horizSpeed / GAME_CONSTANTS.WALK_SPEED, 0.55, 1.45);
     const sprintScale = THREE.MathUtils.clamp(horizSpeed / GAME_CONSTANTS.SPRINT_SPEED, 0.55, 1.45);
-    const crouchScale = THREE.MathUtils.clamp(horizSpeed / GAME_CONSTANTS.CROUCH_SPEED, 0.55, 1.45);
+    const crouchScale =
+      horizSpeed < 0.25
+        ? 0.25
+        : THREE.MathUtils.clamp(horizSpeed / GAME_CONSTANTS.CROUCH_SPEED, 0.55, 1.45);
     c.hero.actions.Run.timeScale = runScale;
     c.hero.actions.RunArmed.timeScale = runScale;
     c.hero.actions.Sprint.timeScale = sprintScale;
@@ -4801,7 +4840,7 @@ export class WorkspaceRoyaleEngine {
     else if (e.code === 'KeyR') this.startReload(p);
     else if (e.code === 'KeyE') this.tryPlayerInteract();
     else if (e.code === 'KeyQ') this.tryCastUltimate(p);
-    else if (e.code === 'KeyC' && !p.skyDropping) {
+    else if (e.code === 'KeyC' && !p.skyDropping && !this.isHealOrShieldChannel(p.channel)) {
       this.crouchToggled = !this.crouchToggled;
     }
   }
@@ -4810,6 +4849,7 @@ export class WorkspaceRoyaleEngine {
     this.keys.delete(e.code);
     if (!this.keys.has('ShiftLeft') && !this.keys.has('ShiftRight')) {
       this.sprintLatchedOnReload = false;
+      this.sprintLatchedOnChannel = false;
     }
   }
 
@@ -4818,6 +4858,7 @@ export class WorkspaceRoyaleEngine {
     this.mouseLeftDown = false;
     this.mouseRightDown = false;
     this.sprintLatchedOnReload = false;
+    this.sprintLatchedOnChannel = false;
   }
 
   private handleMouseDown(e: MouseEvent): void {
@@ -4884,6 +4925,7 @@ export class WorkspaceRoyaleEngine {
       this.mouseLeftDown = false;
       this.mouseRightDown = false;
       this.sprintLatchedOnReload = false;
+      this.sprintLatchedOnChannel = false;
     }
     if (!this.pointerLocked && this.mapOpen) {
       return;
@@ -4902,6 +4944,8 @@ export class WorkspaceRoyaleEngine {
 
   public dispose(): void {
     this.disposed = true;
+    this.sprintLatchedOnReload = false;
+    this.sprintLatchedOnChannel = false;
     cancelAnimationFrame(this.rafId);
     this.stopSplashAttract();
     window.removeEventListener('resize', this.onResizeBound);

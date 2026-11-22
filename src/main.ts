@@ -1321,7 +1321,16 @@ function escapeHtml(text: string): string {
 function renderStatusBadges(state: HudSnapshot): void {
   const badges: { cls: string; text: string }[] = [];
   if (state.status.crouching) {
-    badges.push({ cls: 'crouch', text: 'CROUCH • -45% SPREAD' });
+    let crouchLabel = 'CROUCH • -45% SPREAD';
+    if (state.channel.active && state.channel.kind === 'consumable') {
+      const lower = state.channel.label.toLowerCase();
+      if (lower.includes('shield')) {
+        crouchLabel = 'CROUCHING • SHIELDING';
+      } else if (lower.includes('medkit')) {
+        crouchLabel = 'CROUCHING • HEALING';
+      }
+    }
+    badges.push({ cls: 'crouch', text: crouchLabel });
   }
   if (state.status.silencedSec > 0.05) {
     badges.push({ cls: 'silenced', text: `SILENCED ${state.status.silencedSec.toFixed(1)}s` });
