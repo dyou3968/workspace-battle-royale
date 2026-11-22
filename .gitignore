@@ -1,0 +1,20 @@
+# Dependencies & build output
+node_modules/
+dist/
+
+# OS & tool caches
+.DS_Store
+.wrangler/
+**/__pycache__/
+*.pyc
+*.log
+
+# Environment files
+.env
+.env.*
+
+# Heavy Blender source & preview artifacts (runtime GLBs live in public/assets/)
+docs/*.blend
+docs/*.blend1
+docs/googleplex_full_campus.glb
+docs/previews/

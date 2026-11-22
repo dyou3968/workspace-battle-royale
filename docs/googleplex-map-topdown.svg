@@ -1,0 +1,545 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 840" width="1200" height="840" font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif">
+  <defs>
+    <clipPath id="arenaClip">
+      <rect x="60" y="74" width="1080" height="684" rx="12"/>
+    </clipPath>
+    <linearGradient id="northHills" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8b8356"/>
+      <stop offset="65%" stop-color="#6c7b47"/>
+      <stop offset="100%" stop-color="#486a3a"/>
+    </linearGradient>
+    <linearGradient id="creekWater" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0284c7"/>
+      <stop offset="50%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <linearGradient id="pitchStripe" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#22863a"/>
+      <stop offset="50%" stop-color="#2da44e"/>
+      <stop offset="100%" stop-color="#22863a"/>
+    </linearGradient>
+    <pattern id="turfStripes" width="16" height="16" patternUnits="userSpaceOnUse">
+      <rect width="8" height="16" fill="#238636"/>
+      <rect x="8" width="8" height="16" fill="#2b9a43"/>
+    </pattern>
+    <!-- 20m Coordinate Grid (1.8 px/m -> 36px per 20m), aligned to origin (600, 416) -->
+    <pattern id="grid20" x="600" y="416" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M 36 0 L 0 0 0 36" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="0.9"/>
+    </pattern>
+    <pattern id="dragonscale" width="18" height="18" patternUnits="userSpaceOnUse" patternTransform="rotate(14)">
+      <path d="M 9 0 L 18 9 L 9 18 L 0 9 Z" fill="none" stroke="#94a3b8" stroke-width="1.1" opacity="0.72"/>
+      <path d="M 9 0 L 9 18 M 0 9 L 18 9" fill="none" stroke="#cbd5e1" stroke-width="0.5" opacity="0.45"/>
+    </pattern>
+    <pattern id="solarRoof" width="8" height="5" patternUnits="userSpaceOnUse">
+      <rect width="6.2" height="3.2" fill="#1e3a8a" opacity="0.58"/>
+    </pattern>
+    <pattern id="parkingStripes" width="14" height="12" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="6" x2="10" y2="6" stroke="#cbd5e1" stroke-width="0.9" opacity="0.5"/>
+    </pattern>
+  </defs>
+
+  <!-- Outer Slate Architectural Frame -->
+  <rect width="1200" height="840" fill="#0b1220"/>
+
+  <!-- Header & Coordinate Metadata -->
+  <text x="600" y="27" fill="#f8fafc" font-size="17" font-weight="900" text-anchor="middle" letter-spacing="1.1">MOUNTAIN VIEW GOOGLEPLEX — 3× EXPANDED 2D TOP-DOWN ARENA BLUEPRINT</text>
+  <text x="600" y="45" fill="#94a3b8" font-size="11" font-weight="600" text-anchor="middle">Google Maps 16z Footprint (37.4220° N, 122.0841° W) • Playable Arena: 600m × 380m (228,000 m² · 3× Area · 1 Grid = 20m) • North = -Z (Up)</text>
+
+  <!-- Cardinal Border Axis Labels -->
+  <g font-size="10.5" font-weight="800" text-anchor="middle">
+    <text x="600" y="65" fill="#60a5fa">NORTH (Z = -190m) — Athletic Field · Bay Point Shoreline Overlook · Shoreline Amphitheatre · Google CL2</text>
+    <text x="600" y="775" fill="#34d399">SOUTH (Z = +190m) — 1098 Alta / Huff · Charleston Campus · Plymouth St · Shorebird Way</text>
+    <text x="29" y="416" transform="rotate(-90 29 416)" fill="#38bdf8">WEST (X = -300m) — Charleston Rd Curve &amp; Google 2000 / 1950</text>
+    <text x="1171" y="416" transform="rotate(90 1171 416)" fill="#f8fafc">EAST (X = +300m) — East of N Shoreline Blvd (CL2 · 2015 · 1395)</text>
+  </g>
+
+  <!-- Playable 600m x 380m Arena mapped isotropically at 1.8 px/m: x=[60..1140], y=[74..758], origin=(600, 416) -->
+  <g clip-path="url(#arenaClip)">
+    <!-- Base Mountain View Campus Lawn -->
+    <rect x="60" y="74" width="1080" height="684" fill="#285433"/>
+
+    <!-- Bay Point Regional Shoreline Overlook Golden-Green Bluffs (North of Amphitheatre Pkwy, between Creek & Shoreline Blvd) -->
+    <path d="M 326 74 L 902 74 L 902 295 Q 712 312 575 321 Q 432 311 326 292 Z" fill="url(#northHills)" opacity="0.78"/>
+    <!-- Topographic Bluff Contour Rings & Trails around Bay Point Overlook (-62, -144 -> 488, 157) -->
+    <g fill="none" stroke="#d9d5b8" opacity="0.34">
+      <ellipse cx="488" cy="157" rx="108" ry="52" stroke-width="1.3"/>
+      <ellipse cx="488" cy="157" rx="74" ry="34" stroke-width="1.2"/>
+      <ellipse cx="488" cy="157" rx="40" ry="18" stroke-width="1.1"/>
+    </g>
+    <path d="M 342 222 Q 418 192 488 175 T 632 198 L 656 266" fill="none" stroke="#e2dfc9" stroke-width="2" stroke-dasharray="5 4" opacity="0.62"/>
+    <path d="M 432 82 Q 466 130 488 157 Q 536 226 602 310" fill="none" stroke="#e2dfc9" stroke-width="1.8" stroke-dasharray="4 4" opacity="0.52"/>
+
+    <!-- Subtle 20m Coordinate Grid -->
+    <rect x="60" y="74" width="1080" height="684" fill="url(#grid20)"/>
+
+    <!-- ==================== WATERWAYS & ROADS ==================== -->
+
+    <!-- Permanente Creek (Full N-S at X = -156m -> x = 319.2) & Trail (X = -150m -> x = 330) -->
+    <rect x="315.4" y="74" width="7.6" height="684" fill="url(#creekWater)"/>
+    <line x1="330" y1="74" x2="330" y2="758" stroke="#e2e8f0" stroke-width="3.2" opacity="0.88"/>
+
+    <!-- Amphitheatre Parkway (NW Edge -> Core Curve -> N Shoreline Blvd) -->
+    <path d="M 60 220 L 92.4 228.8 Q 190 258 294 285.7 Q 432.4 311.1 575.2 321.0 Q 711.7 312.3 902.4 295.0" fill="none" stroke="#475569" stroke-width="15.5" stroke-linejoin="round"/>
+    <path d="M 60 220 L 92.4 228.8 Q 190 258 294 285.7 Q 432.4 311.1 575.2 321.0 Q 711.7 312.3 902.4 295.0" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="8 6" opacity="0.72"/>
+
+    <!-- Sweeping Western Charleston Rd Curve (-282,-104 -> -210,+53 -> -170,+55.5) + Inner & East Charleston Rd -->
+    <path d="M 92.4 228.8 C 72 325 74 445 118 492 Q 158 511 222 511.4 L 294 515.9 L 902.4 554.2 L 1140 569.0" fill="none" stroke="#475569" stroke-width="14.5" stroke-linejoin="round"/>
+    <path d="M 92.4 228.8 C 72 325 74 445 118 492 Q 158 511 222 511.4 L 294 515.9 L 902.4 554.2 L 1140 569.0" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="8 6" opacity="0.72"/>
+
+    <!-- N Shoreline Blvd (Full N-S Artery at X = +168m -> x = 902.4) -->
+    <line x1="902.4" y1="74" x2="902.4" y2="758" stroke="#475569" stroke-width="16"/>
+    <line x1="902.4" y1="74" x2="902.4" y2="758" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="8 6" opacity="0.72"/>
+
+    <!-- Eastern E-W Arteries (East of N Shoreline Blvd): Crittenden Ln (-108), Stierlin Ct (-65), Shorebird Way (+160) -->
+    <g stroke="#475569" stroke-width="11.5">
+      <line x1="902.4" y1="221.6" x2="1140" y2="221.6"/>
+      <line x1="902.4" y1="299.0" x2="1140" y2="299.0"/>
+      <line x1="902.4" y1="704.0" x2="1140" y2="704.0"/>
+    </g>
+    <g stroke="#cbd5e1" stroke-width="1" stroke-dasharray="7 5" opacity="0.65">
+      <line x1="910" y1="221.6" x2="1140" y2="221.6"/>
+      <line x1="910" y1="299.0" x2="1140" y2="299.0"/>
+      <line x1="910" y1="704.0" x2="1140" y2="704.0"/>
+    </g>
+
+    <!-- Plymouth St (South Border Artery at Z = +180m -> y = 740, X in [-150, +168]) -->
+    <line x1="330" y1="740" x2="902.4" y2="740" stroke="#475569" stroke-width="11.5"/>
+    <line x1="330" y1="740" x2="896" y2="740" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="7 5" opacity="0.65"/>
+
+    <!-- Bill Graham Pkwy (N spur to Amphitheatre & Lot C) + Curved Joaquin Rd (Core) + East Charleston Access Road (X=+92m) -->
+    <path d="M 730 202 L 726.5 218 L 732.8 309.6 Q 696.8 346.7 701.9 409.2 Q 705.5 470.9 739.0 544.0" fill="none" stroke="#475569" stroke-width="11" stroke-linejoin="round"/>
+    <path d="M 730 202 L 726.5 218 L 732.8 309.6 Q 696.8 346.7 701.9 409.2 Q 705.5 470.9 739.0 544.0" fill="none" stroke="#cbd5e1" stroke-width="0.95" stroke-dasharray="6 5" opacity="0.62"/>
+    <!-- Lot C East-West Connector (Bill Graham <-> Lot C <-> N Shoreline Blvd at Crittenden Ln) -->
+    <path d="M 727 219 L 902.4 221.6" fill="none" stroke="#475569" stroke-width="9"/>
+    <path d="M 732 219 L 896 221.5" fill="none" stroke="#cbd5e1" stroke-width="0.85" stroke-dasharray="5 4" opacity="0.58"/>
+
+    <!-- Alta Ave (X=-94.5 -> -97.2), Huff Ave (X=+2.8 -> +1.4) & Charleston East Access (X=+92m) South Connectors -->
+    <g stroke="#475569" stroke-width="10">
+      <path d="M 429.9 524.5 L 426.1 614.0 L 425.0 740.0" fill="none"/>
+      <path d="M 605.0 535.5 L 602.5 614.0 L 602.5 740.0" fill="none"/>
+      <line x1="765.6" y1="545.6" x2="765.6" y2="740.0"/>
+    </g>
+    <g stroke="#cbd5e1" stroke-width="0.9" stroke-dasharray="6 5" opacity="0.58">
+      <path d="M 429.6 532 L 426.1 614.0 L 425.0 734.0" fill="none"/>
+      <path d="M 604.7 542 L 602.5 614.0 L 602.5 734.0" fill="none"/>
+      <line x1="765.6" y1="552" x2="765.6" y2="734.0"/>
+    </g>
+
+    <!-- Twin Pedestrian Bridges over Permanente Creek: North Park Bridge (Z=-126m) & Main Quad Bridge (Z=-2m) -->
+    <g>
+      <rect x="308" y="185" width="30" height="8.5" rx="2" fill="#e2e8f0" stroke="#0f172a" stroke-width="1.2"/>
+      <line x1="309" y1="186.5" x2="337" y2="186.5" stroke="#475569" stroke-width="1"/>
+      <line x1="309" y1="192" x2="337" y2="192" stroke="#475569" stroke-width="1"/>
+
+      <rect x="307" y="407" width="31" height="10" rx="2" fill="#e2e8f0" stroke="#0f172a" stroke-width="1.3"/>
+      <line x1="308" y1="408.5" x2="337" y2="408.5" stroke="#475569" stroke-width="1.1"/>
+      <line x1="308" y1="415.5" x2="337" y2="415.5" stroke="#475569" stroke-width="1.1"/>
+    </g>
+
+    <!-- ==================== NORTH RING LANDMARKS (Z in [-190, -110]) ==================== -->
+
+    <!-- 1. Google Athletic Recreation Field (-220, -134 -> 204, 174.8; 66m x 42m -> 118.8 x 75.6) -->
+    <g>
+      <rect x="144.6" y="137.0" width="118.8" height="75.6" rx="4" fill="url(#turfStripes)" stroke="#86efac" stroke-width="2"/>
+      <!-- Crisp White Soccer Pitch Lines -->
+      <rect x="150.6" y="142.5" width="106.8" height="64.6" fill="none" stroke="#f8fafc" stroke-width="1.2" opacity="0.9"/>
+      <line x1="204.0" y1="142.5" x2="204.0" y2="207.1" stroke="#f8fafc" stroke-width="1.2" opacity="0.9"/>
+      <circle cx="204.0" cy="174.8" r="11" fill="none" stroke="#f8fafc" stroke-width="1.2" opacity="0.9"/>
+      <circle cx="204.0" cy="174.8" r="1.8" fill="#f8fafc"/>
+      <!-- Penalty Boxes & Goals -->
+      <rect x="150.6" y="159.8" width="15" height="30" fill="none" stroke="#f8fafc" stroke-width="1.1" opacity="0.88"/>
+      <rect x="242.4" y="159.8" width="15" height="30" fill="none" stroke="#f8fafc" stroke-width="1.1" opacity="0.88"/>
+      <rect x="146.2" y="168.8" width="4.4" height="12" fill="none" stroke="#e2e8f0" stroke-width="1.4"/>
+      <rect x="257.4" y="168.8" width="4.4" height="12" fill="none" stroke="#e2e8f0" stroke-width="1.4"/>
+      <!-- Aluminum Spectator Bleachers (South side) & Dugouts -->
+      <rect x="174" y="214.5" width="60" height="7" rx="1.5" fill="#94a3b8" stroke="#334155" stroke-width="1"/>
+      <rect x="154" y="214.5" width="14" height="5.5" rx="1" fill="#475569" stroke="#cbd5e1" stroke-width="0.8"/>
+      <rect x="240" y="214.5" width="14" height="5.5" rx="1" fill="#475569" stroke="#cbd5e1" stroke-width="0.8"/>
+    </g>
+
+    <!-- 2. Shoreline Amphitheatre (+58, -148 -> 704.4, 149.6; oriented SE +32 deg matching 3D GLB) -->
+    <g transform="translate(704.4, 149.6) rotate(-32)">
+      <!-- Entry Concourse Apron -->
+      <ellipse cx="0" cy="8" rx="60" ry="48" fill="#cbd5e1" fill-opacity="0.22" stroke="#94a3b8" stroke-width="1.2"/>
+      <!-- Curved Terraced Seating Bowl -->
+      <path d="M -44 6 A 48 40 0 0 0 44 6 L 38 30 A 60 48 0 0 1 -38 30 Z" fill="#3f6212" stroke="#84cc16" stroke-width="1.2" opacity="0.82"/>
+      <!-- Iconic Twin-Peak White Tensioned-Fabric Concert Tent -->
+      <path d="M -52 -12 Q -24 -44 0 -28 Q 24 -44 52 -12 Q 46 18 0 24 Q -46 18 -52 -12 Z" fill="#f8fafc" fill-opacity="0.96" stroke="#38bdf8" stroke-width="2.4"/>
+      <!-- Steel Masts & Tension Cable Ribs -->
+      <g stroke="#94a3b8" stroke-width="1" opacity="0.78">
+        <line x1="-22" y1="-10" x2="-52" y2="-12"/>
+        <line x1="-22" y1="-10" x2="-24" y2="-36"/>
+        <line x1="-22" y1="-10" x2="0" y2="-28"/>
+        <line x1="-22" y1="-10" x2="0" y2="24"/>
+        <line x1="-22" y1="-10" x2="-40" y2="14"/>
+        <line x1="22" y1="-10" x2="52" y2="-12"/>
+        <line x1="22" y1="-10" x2="24" y2="-36"/>
+        <line x1="22" y1="-10" x2="0" y2="-28"/>
+        <line x1="22" y1="-10" x2="0" y2="24"/>
+        <line x1="22" y1="-10" x2="40" y2="14"/>
+        <line x1="-22" y1="-10" x2="22" y2="-10" stroke="#38bdf8" stroke-width="1.4"/>
+      </g>
+      <circle cx="-22" cy="-10" r="3.4" fill="#0284c7" stroke="#ffffff" stroke-width="1.2"/>
+      <circle cx="22" cy="-10" r="3.4" fill="#0284c7" stroke="#ffffff" stroke-width="1.2"/>
+      <!-- Twin SE Entry Concourse Kiosks -->
+      <rect x="-26" y="42" width="12" height="6" rx="1.5" fill="#ea580c" stroke="#fed7aa" stroke-width="0.9"/>
+      <rect x="14" y="42" width="12" height="6" rx="1.5" fill="#ea580c" stroke="#fed7aa" stroke-width="0.9"/>
+    </g>
+
+    <!-- 3. Parking Lot C (+118, -112 -> 812.4, 214.4; striped apron) -->
+    <g>
+      <rect x="774" y="191" width="102" height="54" rx="5" fill="#334155" stroke="#64748b" stroke-width="1.6"/>
+      <rect x="780" y="196" width="90" height="44" rx="2.5" fill="url(#parkingStripes)" opacity="0.88"/>
+    </g>
+
+    <!-- ==================== WEST RING LANDMARK (X in [-300, -170]) ==================== -->
+
+    <!-- 4. Google 2000 & 1950 Complex (-225, +2 -> exact 3D twin boomerang wing polygons) -->
+    <g>
+      <!-- Campus Apron & Landscaped Courtyard -->
+      <path d="M 118 338 Q 195 328 274 344 L 278 498 Q 195 508 124 494 Q 108 416 118 338 Z" fill="#cbd5e1" fill-opacity="0.22" stroke="#94a3b8" stroke-width="1.3"/>
+      <rect x="148" y="407" width="96" height="24" rx="5" fill="#36723f" stroke="#86efac" stroke-width="1.1" opacity="0.85"/>
+      <!-- Google 2000 (North Boomerang Wing: [-264,-15],[-235,-11],[-189,-13],[-185,-37],[-229,-42],[-265,-36]) -->
+      <polygon points="124.8,389.0 177.0,396.2 259.8,392.6 267.0,349.4 187.8,340.4 123.0,351.2" fill="#2563eb" fill-opacity="0.92" stroke="#93c5fd" stroke-width="2.2"/>
+      <polygon points="131,383 177,390 253,387 260,355 188,347 130,356" fill="url(#solarRoof)"/>
+      <!-- Google 1950 (South Boomerang Wing: [-256,34],[-213,45],[-185,42],[-187,17],[-237,15],[-264,20]) -->
+      <polygon points="139.2,477.2 216.6,497.0 267.0,491.6 263.4,446.6 173.4,443.0 124.8,452.0" fill="#0d9488" fill-opacity="0.92" stroke="#5eead4" stroke-width="2.2"/>
+      <polygon points="145,472 216,490 260,485 257,452 174,449 132,457" fill="url(#solarRoof)"/>
+    </g>
+
+    <!-- ==================== CORE GOOGLEPLEX CENTER (X in [-170,+170], Z in [-110,+110]) ==================== -->
+
+    <!-- Quad Paved Apron, West Parking Strip & Central Courtyard Lawn -->
+    <path d="M 342 316 L 575 336 L 608 404 L 594 510 L 342 500 Z" fill="#cbd5e1" fill-opacity="0.26" stroke="#94a3b8" stroke-width="1.3"/>
+    <rect x="346" y="328" width="15" height="164" rx="3" fill="#334155" opacity="0.72" stroke="#64748b" stroke-width="0.9"/>
+    <path d="M 412 386 L 548 396 L 544 452 L 410 446 Z" fill="#3f7d47" stroke="#e2e8f0" stroke-width="1.2"/>
+
+    <!-- B41 (-112, -31) Exact Polygon -->
+    <polygon points="368.6,368.3 387.2,393.1 415.8,385.7 433.2,345.9 399.6,327.3 366.1,341.0" fill="#1d4ed8" fill-opacity="0.92" stroke="#93c5fd" stroke-width="2.1"/>
+    <polygon points="374,366 389,386 411,380 426,348 400,334 373,345" fill="url(#solarRoof)"/>
+
+    <!-- B42 (-117, +23) Exact Polygon -->
+    <polygon points="361.5,459.9 366.4,493.4 404.9,494.6 418.6,457.4 408.6,421.4 363.9,423.9" fill="#0f766e" fill-opacity="0.92" stroke="#5eead4" stroke-width="2.1"/>
+
+    <!-- B40 / Charlie's Café & Partner Plex Exact Polygon -->
+    <polygon points="446.7,383.8 489.0,397.4 552.3,408.6 598.2,402.4 605.7,381.3 567.2,363.9 510.1,347.8 450.5,354.0" fill="#b91c1c" fill-opacity="0.92" stroke="#fca5a5" stroke-width="2.1"/>
+    <polygon points="454,378 491,390 551,401 591,396 597,383 564,369 510,355 456,360" fill="url(#solarRoof)"/>
+
+    <!-- B43 (Solar Roof) Exact Polygon -->
+    <polygon points="421.1,490.9 508.0,503.3 570.1,502.1 555.2,462.4 483.2,447.5 423.6,453.7" fill="#d97706" fill-opacity="0.92" stroke="#fde68a" stroke-width="2.1"/>
+    <polygon points="429,486 508,496 561,495 549,467 483,454 430,459" fill="url(#solarRoof)"/>
+
+    <!-- Elevated Central Glass Skybridge (-73, +2 -> +4.2m) -->
+    <polygon points="457.5,387.5 471.0,388.8 481.0,452.0 467.5,453.2" fill="#bae6fd" fill-opacity="0.9" stroke="#0284c7" stroke-width="2"/>
+
+    <!-- Sand Volleyball Court (-91, +4 -> 436.2, 423.2) -->
+    <g transform="translate(436.2, 423.2) rotate(-10)">
+      <rect x="-15.5" y="-8.5" width="31" height="17" rx="2" fill="#f3d69b" stroke="#b45309" stroke-width="1.6"/>
+      <line x1="0" y1="-8.5" x2="0" y2="8.5" stroke="#ffffff" stroke-width="1.4" stroke-dasharray="2.5 1.5"/>
+    </g>
+
+    <!-- Stan the T-Rex Plaza (-51, +4 -> 508.2, 423.2) + Colorful Google Umbrellas -->
+    <g transform="translate(508.2, 423.2)">
+      <circle cx="0" cy="0" r="14" fill="#e2e8f0" fill-opacity="0.92" stroke="#fbbc04" stroke-width="2"/>
+      <rect x="-4" y="-6.5" width="8" height="13" rx="2" fill="#78716c" stroke="#fef3c7" stroke-width="1.1"/>
+      <circle cx="-18" cy="-12" r="4.1" fill="#4285f4" stroke="#fff" stroke-width="1"/>
+      <circle cx="-16" cy="14" r="4.1" fill="#ea4335" stroke="#fff" stroke-width="1"/>
+      <circle cx="15" cy="-14" r="4.1" fill="#fbbc04" stroke="#fff" stroke-width="1"/>
+      <circle cx="16" cy="14" r="4.1" fill="#34a853" stroke="#fff" stroke-width="1"/>
+      <circle cx="-2" cy="-20" r="4.1" fill="#4285f4" stroke="#fff" stroke-width="1"/>
+    </g>
+
+    <!-- SE Quad Parking Pad -->
+    <rect x="574" y="462" width="27" height="40" rx="3" fill="#334155" stroke="#60a5fa" stroke-width="1.2" opacity="0.85"/>
+    <text x="587.5" y="486" fill="#93c5fd" font-size="9" font-weight="900" text-anchor="middle">P</text>
+
+    <!-- Charleston Park (+28, -10 -> 650.4, 398) -->
+    <path d="M 596 334 Q 652 329 698 327 Q 694 405 712 508 L 614 507 L 612 454 L 606 402 Z" fill="#1e6b34" fill-opacity="0.9" stroke="#4ade80" stroke-width="1.8"/>
+    <path d="M 605 394 Q 648 383 692 399 M 642 332 Q 652 410 644 504 M 618 446 Q 664 454 704 441" fill="none" stroke="#e2e8f0" stroke-width="2.2" opacity="0.62"/>
+    <g fill="#15803d" stroke="#14532d" stroke-width="1.3">
+      <circle cx="626" cy="358" r="10"/><circle cx="662" cy="352" r="11"/><circle cx="685" cy="372" r="9.5"/>
+      <circle cx="624" cy="414" r="9.5"/><circle cx="666" cy="418" r="11.5"/><circle cx="688" cy="432" r="9"/>
+      <circle cx="636" cy="470" r="10.5"/><circle cx="676" cy="476" r="11"/><circle cx="656" cy="494" r="8.5"/>
+    </g>
+
+    <!-- Gradient Canopy / Google Visitor Experience (+113, +4 -> 803.4, 423.2; 90m x 94m) -->
+    <g transform="translate(803.4, 423.2)">
+      <path d="M -71 -74 Q 0 -88 66 -80 Q 84 0 78 75 Q 8 94 -60 86 Q -86 6 -71 -74 Z" fill="#f1f5f9" fill-opacity="0.95" stroke="#3b82f6" stroke-width="2.5"/>
+      <path d="M -67 -70 Q 0 -84 62 -76 Q 79 0 73 71 Q 8 89 -56 81 Q -81 6 -67 -70 Z" fill="url(#dragonscale)"/>
+    </g>
+
+    <!-- The Orb Plaza (+152, +60 -> 873.6, 524) -->
+    <g transform="translate(873.6, 524)">
+      <circle cx="0" cy="0" r="9.5" fill="#e2e8f0" stroke="#38bdf8" stroke-width="2"/>
+      <circle cx="0" cy="0" r="4.2" fill="#0284c7"/>
+    </g>
+
+    <!-- ==================== SOUTH RING LANDMARKS (Z in [+110, +190]) ==================== -->
+
+    <!-- 5. 1098 Alta / Huff Complex (-108, +126 -> 3 white-roofed wings cleanly straddling Alta Ave X=-96.8) -->
+    <g>
+      <!-- West Apron & Garden Walk -->
+      <rect x="334" y="591" width="80" height="104" rx="6" fill="#cbd5e1" fill-opacity="0.18" stroke="#94a3b8" stroke-width="1.1"/>
+      <rect x="342" y="631" width="66" height="23" rx="3" fill="#2f6e3d" opacity="0.9"/>
+      <!-- NorthWestWing [-146..-105, 99..118] -->
+      <rect x="337.2" y="594.2" width="73.8" height="34.2" rx="4" fill="#e2e8f0" fill-opacity="0.94" stroke="#60a5fa" stroke-width="2"/>
+      <rect x="343" y="599" width="62" height="24" rx="2" fill="url(#solarRoof)" opacity="0.5"/>
+      <!-- SouthWestWing [-146..-105, 134..153] -->
+      <rect x="337.2" y="657.2" width="73.8" height="34.2" rx="4" fill="#e2e8f0" fill-opacity="0.94" stroke="#60a5fa" stroke-width="2"/>
+      <rect x="343" y="662" width="62" height="24" rx="2" fill="url(#solarRoof)" opacity="0.5"/>
+      <!-- EastWing [-89..-70, 101..151] -->
+      <rect x="439.8" y="597.8" width="34.2" height="90.0" rx="4" fill="#e2e8f0" fill-opacity="0.94" stroke="#60a5fa" stroke-width="2"/>
+      <rect x="445" y="604" width="24" height="78" rx="2" fill="url(#solarRoof)" opacity="0.5"/>
+    </g>
+
+    <!-- 6. Charleston Campus (+28, +134 -> 4 wings + Parking Deck cleanly straddling Huff Ave X=+1.4) -->
+    <g>
+      <!-- WestWing [-27..-6, 107..161] (West of Huff Ave) -->
+      <rect x="551.4" y="608.6" width="37.8" height="97.2" rx="4" fill="#0369a1" fill-opacity="0.92" stroke="#7dd3fc" stroke-width="2"/>
+      <rect x="557" y="615" width="26.5" height="84" fill="url(#solarRoof)"/>
+      <!-- East Courtyard Campus Apron (East of Huff Ave) -->
+      <rect x="613" y="598" width="140" height="118" rx="7" fill="#cbd5e1" fill-opacity="0.2" stroke="#94a3b8" stroke-width="1.2"/>
+      <!-- Sunlit Central Courtyard Plaza -->
+      <rect x="618" y="636" width="68" height="42" rx="4" fill="#3b7a45" stroke="#e2e8f0" stroke-width="1.1"/>
+      <circle cx="652" cy="657" r="9.5" fill="#e2e8f0" fill-opacity="0.85" stroke="#fbbc04" stroke-width="1.3"/>
+      <!-- NorthWing [9..66, 103..121] -->
+      <rect x="616.2" y="601.4" width="102.6" height="32.4" rx="4" fill="#0369a1" fill-opacity="0.92" stroke="#7dd3fc" stroke-width="2"/>
+      <rect x="622" y="606" width="91" height="23" fill="url(#solarRoof)"/>
+      <!-- SouthWing [9..66, 147..165] -->
+      <rect x="616.2" y="680.6" width="102.6" height="32.4" rx="4" fill="#0369a1" fill-opacity="0.92" stroke="#7dd3fc" stroke-width="2"/>
+      <rect x="622" y="685" width="91" height="23" fill="url(#solarRoof)"/>
+      <!-- EastSpine [49..66, 123..145] -->
+      <rect x="688.2" y="637.4" width="30.6" height="39.6" rx="3" fill="#0284c7" fill-opacity="0.92" stroke="#7dd3fc" stroke-width="1.8"/>
+      <!-- East Parking Deck [69..83, 106..162] (+6.4m walkable solar top deck) -->
+      <rect x="724.2" y="606.8" width="25.2" height="100.8" rx="3" fill="#334155" stroke="#60a5fa" stroke-width="1.6"/>
+      <rect x="727.5" y="611" width="18.5" height="92" fill="url(#solarRoof)" opacity="0.8"/>
+      <text x="736.8" y="661" fill="#93c5fd" font-size="8.5" font-weight="900" text-anchor="middle">P</text>
+    </g>
+
+    <!-- ==================== EAST RING LANDMARKS (East of N Shoreline Blvd, X in [+170, +300]) ==================== -->
+
+    <!-- 7. Google CL2 Crittenden (+236, -140 -> chamfered octagon 66m x 44m) -->
+    <g>
+      <rect x="959" y="119" width="131.6" height="90" rx="7" fill="#cbd5e1" fill-opacity="0.18" stroke="#94a3b8" stroke-width="1.2"/>
+      <polygon points="976.2,124.4 1073.4,124.4 1084.2,135.2 1084.2,192.8 1073.4,203.6 976.2,203.6 965.4,192.8 965.4,135.2" fill="#0f766e" fill-opacity="0.93" stroke="#5eead4" stroke-width="2.2"/>
+      <rect x="977" y="133" width="95.6" height="62" rx="3" fill="url(#solarRoof)"/>
+    </g>
+
+    <!-- 8. Google 2015 / Stierlin Ct (+234, -22 -> chamfered octagon 66m x 44m) -->
+    <g>
+      <rect x="955" y="331" width="132" height="90" rx="7" fill="#cbd5e1" fill-opacity="0.18" stroke="#94a3b8" stroke-width="1.2"/>
+      <polygon points="972.6,336.8 1069.8,336.8 1080.6,347.6 1080.6,405.2 1069.8,416.0 972.6,416.0 961.8,405.2 961.8,347.6" fill="#1d4ed8" fill-opacity="0.93" stroke="#93c5fd" stroke-width="2.2"/>
+      <rect x="973" y="345" width="96" height="62" rx="3" fill="url(#solarRoof)"/>
+    </g>
+
+    <!-- 9. Google 1395 Charleston / SB10 (+234, +122 -> chamfered octagon 66m x 44m) -->
+    <g>
+      <rect x="955" y="590" width="132" height="90" rx="7" fill="#cbd5e1" fill-opacity="0.18" stroke="#94a3b8" stroke-width="1.2"/>
+      <polygon points="972.6,596.0 1069.8,596.0 1080.6,606.8 1080.6,664.4 1069.8,675.2 972.6,675.2 961.8,664.4 961.8,606.8" fill="#4338ca" fill-opacity="0.93" stroke="#a5b4fc" stroke-width="2.2"/>
+      <rect x="973" y="604" width="96" height="62" rx="3" fill="url(#solarRoof)"/>
+    </g>
+
+    <!-- Perimeter California Live Oaks & Redwoods across Outer Campus Rings -->
+    <g fill="#166534" stroke="#14532d" stroke-width="1.2" opacity="0.88">
+      <circle cx="114" cy="162" r="8"/><circle cx="116" cy="202" r="9"/><circle cx="290" cy="148" r="9"/><circle cx="292" cy="236" r="8.5"/>
+      <circle cx="378" cy="264" r="9"/><circle cx="598" cy="272" r="9.5"/><circle cx="880" cy="146" r="9"/><circle cx="882" cy="272" r="8"/>
+      <circle cx="932" cy="168" r="8.5"/><circle cx="932" cy="378" r="8.5"/><circle cx="932" cy="494" r="9.5"/><circle cx="1114" cy="482" r="10"/>
+      <circle cx="932" cy="636" r="8.5"/><circle cx="1114" cy="636" r="9"/><circle cx="152" cy="574" r="10"/><circle cx="222" cy="592" r="11"/>
+      <circle cx="278" cy="642" r="10"/><circle cx="294" cy="566" r="9"/><circle cx="510" cy="576" r="8.5"/><circle cx="826" cy="642" r="11"/>
+      <circle cx="860" cy="692" r="10"/><circle cx="798" cy="702" r="9.5"/><circle cx="972" cy="486" r="10"/><circle cx="1066" cy="484" r="9.5"/>
+    </g>
+
+    <!-- ==================== GAMEPLAY OVERLAYS (3× SCALE) ==================== -->
+
+    <!-- Glider Sky-Drop Perimeter Ring (y = 135m, 20 Combatants) -->
+    <ellipse cx="600" cy="416" rx="486" ry="302" fill="none" stroke="#facc15" stroke-width="2.1" stroke-dasharray="11 7" opacity="0.72"/>
+
+    <!-- Storm Phase 2 Safe Zone Preview (r = 155m -> 279px) -->
+    <circle cx="582" cy="416" r="279" fill="none" stroke="#c084fc" stroke-width="2.6" stroke-dasharray="10 6" opacity="0.86"/>
+
+    <!-- 6 Distributed Mid-Match Supply Drop Zones (3× Campus) -->
+    <g fill="#facc15" stroke="#0f172a" stroke-width="1.5">
+      <!-- Core Charleston Park -->
+      <polygon points="665,436 673,450 657,450"/>
+      <!-- North Shoreline Meadow -->
+      <polygon points="622,226 630,240 614,240"/>
+      <!-- West Creek Plaza -->
+      <polygon points="286,360 294,374 278,374"/>
+      <!-- South Alta/Huff Meadow -->
+      <polygon points="510,564 518,578 502,578"/>
+      <!-- East Canopy North Lawn -->
+      <polygon points="846,310 854,324 838,324"/>
+      <!-- East Stierlin Meadow -->
+      <polygon points="1021,474 1029,488 1013,488"/>
+    </g>
+
+    <!-- ==================== CRISP NON-OVERLAPPING LABELS ==================== -->
+
+    <!-- Road & Waterway Labels -->
+    <g font-weight="800" text-anchor="middle" letter-spacing="0.5">
+      <text x="342" y="180" fill="#bae6fd" font-size="8.2" transform="rotate(-90 342 180)">PERMANENTE CREEK TRAIL</text>
+      <text x="218" y="269" fill="#f8fafc" font-size="8.2" transform="rotate(15 218 269)">AMPHITHEATRE PKWY</text>
+      <text x="536" y="324" fill="#f8fafc" font-size="8.5">AMPHITHEATRE PKWY</text>
+      <text x="80" y="408" fill="#f8fafc" font-size="8.2" transform="rotate(-88 80 408)">CHARLESTON RD</text>
+      <text x="458" y="529" fill="#f8fafc" font-size="8.5" transform="rotate(3.6 458 529)">CHARLESTON RD</text>
+      <text x="1024" y="565" fill="#f8fafc" font-size="8.5" transform="rotate(3.6 1024 565)">CHARLESTON RD</text>
+      <text x="905.5" y="458" fill="#f8fafc" font-size="8.5" transform="rotate(-90 905.5 458)">N SHORELINE BLVD</text>
+      <text x="1024" y="224.5" fill="#e2e8f0" font-size="8">CRITTENDEN LN</text>
+      <text x="1024" y="302" fill="#e2e8f0" font-size="8">STIERLIN CT</text>
+      <text x="1024" y="707" fill="#e2e8f0" font-size="8">SHOREBIRD WAY</text>
+      <text x="646" y="743" fill="#e2e8f0" font-size="8.2">PLYMOUTH ST</text>
+      <text x="705" y="410" fill="#e2e8f0" font-size="7.5" transform="rotate(-84 705 410)">JOAQUIN RD</text>
+      <text x="735" y="264" fill="#cbd5e1" font-size="7.2" transform="rotate(-90 735 264)">BILL GRAHAM</text>
+      <text x="430" y="562" fill="#cbd5e1" font-size="7.2" transform="rotate(-90 430 562)">ALTA AVE</text>
+      <text x="606.5" y="568" fill="#cbd5e1" font-size="7.2" transform="rotate(-90 606.5 568)">HUFF AVE</text>
+    </g>
+
+    <!-- North Ring Landmark Labels -->
+    <g text-anchor="middle">
+      <!-- Athletic Field -->
+      <rect x="134" y="106" width="140" height="26" rx="5" fill="#0f172a" fill-opacity="0.82" stroke="#4ade80" stroke-width="1"/>
+      <text x="204" y="117.5" fill="#f0fdf4" font-size="8.5" font-weight="900">GOOGLE ATHLETIC FIELD</text>
+      <text x="204" y="128" fill="#86efac" font-size="7" font-weight="700">Soccer Pitch • (-220, -134)</text>
+
+      <!-- Bay Point Overlook -->
+      <rect x="415" y="138" width="146" height="31" rx="6" fill="#0f172a" fill-opacity="0.72" stroke="#d9d5b8" stroke-width="1"/>
+      <text x="488" y="151" fill="#fef9c3" font-size="9" font-weight="900">BAY POINT OVERLOOK</text>
+      <text x="488" y="163" fill="#e2e8f0" font-size="7.2" font-weight="700">Shoreline Bluff &amp; Trails • (-62, -144)</text>
+
+      <!-- Shoreline Amphitheatre -->
+      <rect x="634.4" y="142" width="140" height="27" rx="5" fill="#0f172a" fill-opacity="0.86" stroke="#38bdf8" stroke-width="1"/>
+      <text x="704.4" y="153.5" fill="#f8fafc" font-size="8.3" font-weight="900">SHORELINE AMPHITHEATRE</text>
+      <text x="704.4" y="164" fill="#7dd3fc" font-size="6.9" font-weight="700">Twin-Peak Tent (+18m) • (+58, -148)</text>
+
+      <!-- Parking Lot C -->
+      <rect x="783" y="207" width="84" height="22" rx="4" fill="#0f172a" fill-opacity="0.84" stroke="#94a3b8" stroke-width="0.9"/>
+      <text x="825" y="217" fill="#f1f5f9" font-size="8" font-weight="900">PARKING LOT C</text>
+      <text x="825" y="226" fill="#94a3b8" font-size="6.6" font-weight="700">(+118, -112)</text>
+    </g>
+
+    <!-- West Ring Landmark Labels -->
+    <g text-anchor="middle">
+      <text x="195" y="371" fill="#ffffff" font-size="9.5" font-weight="900">GOOGLE 2000</text>
+      <text x="195" y="382" fill="#bfdbfe" font-size="7.2" font-weight="700">North Wing • Roof +6.4m</text>
+      <text x="195" y="464" fill="#ffffff" font-size="9.5" font-weight="900">GOOGLE 1950</text>
+      <text x="195" y="475" fill="#ccfbf1" font-size="7.2" font-weight="700">South Wing • (-225, +2)</text>
+    </g>
+
+    <!-- Core Googleplex Landmark Labels -->
+    <g text-anchor="middle">
+      <text x="398" y="357" fill="#ffffff" font-size="9.5" font-weight="900">B41</text>
+      <text x="398" y="368" fill="#bfdbfe" font-size="6.8" font-weight="700">+6.4m</text>
+
+      <text x="390" y="456" fill="#ffffff" font-size="9.5" font-weight="900">B42</text>
+      <text x="390" y="467" fill="#ccfbf1" font-size="6.8" font-weight="700">+6.4m</text>
+
+      <text x="504" y="373" fill="#ffffff" font-size="8.6" font-weight="900">B40 · CHARLIE'S</text>
+      <text x="568" y="388" fill="#fee2e2" font-size="7.2" font-weight="800">PARTNER PLEX</text>
+
+      <text x="494" y="478" fill="#ffffff" font-size="9.2" font-weight="900">B43 (SOLAR ROOF)</text>
+      <text x="494" y="489" fill="#fef3c7" font-size="6.8" font-weight="700">Roof +6.4m</text>
+
+      <text x="469" y="421" fill="#0f172a" font-size="6.4" font-weight="900" transform="rotate(81 469 421)">SKY +4.2m</text>
+      <text x="436" y="440" fill="#fef3c7" font-size="6.6" font-weight="900">V-BALL</text>
+
+      <rect x="530" y="416" width="54" height="15" rx="3.5" fill="#0f172a" fill-opacity="0.84" stroke="#fbbc04" stroke-width="0.9"/>
+      <text x="557" y="426" fill="#fef08a" font-size="7" font-weight="900">STAN PLAZA</text>
+
+      <!-- Charleston Park Label Pill -->
+      <rect x="615" y="384" width="76" height="27" rx="5" fill="#052e16" fill-opacity="0.84" stroke="#4ade80" stroke-width="1"/>
+      <text x="653" y="396" fill="#f0fdf4" font-size="8.2" font-weight="900">CHARLESTON</text>
+      <text x="653" y="406.5" fill="#bbf7d0" font-size="7.6" font-weight="800">PARK</text>
+
+      <!-- Gradient Canopy Label -->
+      <text x="803.4" y="399" fill="#0f172a" font-size="10.5" font-weight="900">GRADIENT CANOPY</text>
+      <text x="803.4" y="412" fill="#1d4ed8" font-size="7.8" font-weight="800">Dragonscale Roof (+10.5m)</text>
+      <rect x="747" y="423" width="113" height="28" rx="6" fill="#1e293b" fill-opacity="0.88"/>
+      <text x="803.5" y="435" fill="#c084fc" font-size="7.6" font-weight="900">VISITOR EXPERIENCE</text>
+      <text x="803.5" y="446" fill="#e2e8f0" font-size="6.8" font-weight="700">&amp; HUDDLE • (+113, +4)</text>
+
+      <!-- The Orb -->
+      <rect x="814" y="517" width="46" height="14" rx="3" fill="#0f172a" fill-opacity="0.84" stroke="#38bdf8" stroke-width="0.85"/>
+      <text x="837" y="526.5" fill="#e0f2fe" font-size="7.2" font-weight="900">THE ORB</text>
+    </g>
+
+    <!-- South Ring Landmark Labels -->
+    <g text-anchor="middle">
+      <rect x="339.6" y="696" width="132" height="28" rx="5" fill="#0f172a" fill-opacity="0.88" stroke="#60a5fa" stroke-width="1"/>
+      <text x="405.6" y="708" fill="#f8fafc" font-size="8.6" font-weight="900">1098 ALTA / HUFF</text>
+      <text x="405.6" y="719" fill="#93c5fd" font-size="6.9" font-weight="700">3-Wing (+6.4m) • (-108, +126)</text>
+
+      <rect x="612" y="644" width="112" height="26" rx="5" fill="#0f172a" fill-opacity="0.88" stroke="#7dd3fc" stroke-width="1"/>
+      <text x="668" y="655.5" fill="#ffffff" font-size="8.5" font-weight="900">CHARLESTON CAMPUS</text>
+      <text x="668" y="666" fill="#bae6fd" font-size="6.8" font-weight="700">4-Wing (+6.4m) • (+28, +134)</text>
+    </g>
+
+    <!-- East Ring Landmark Labels -->
+    <g text-anchor="middle">
+      <text x="1025" y="155" fill="#ffffff" font-size="9.4" font-weight="900">GOOGLE CL2</text>
+      <text x="1025" y="167" fill="#99f6e4" font-size="7.3" font-weight="700">Crittenden • (+236, -140)</text>
+
+      <text x="1021" y="378" fill="#ffffff" font-size="9.4" font-weight="900">GOOGLE 2015</text>
+      <text x="1021" y="390" fill="#bfdbfe" font-size="7.3" font-weight="700">Stierlin Ct • (+234, -22)</text>
+
+      <text x="1021" y="629" fill="#ffffff" font-size="9.2" font-weight="900">GOOGLE 1395 / SB10</text>
+      <text x="1021" y="641" fill="#c7d2fe" font-size="7.3" font-weight="700">Charleston • (+234, +122)</text>
+    </g>
+
+    <!-- Scale Bar (60m / ~200 ft = 108px) & Compass Rose cleanly parked in open SW Lawn -->
+    <g transform="translate(76, 696)">
+      <rect x="0" y="0" width="212" height="48" rx="8" fill="#0f172a" fill-opacity="0.88" stroke="#475569" stroke-width="1.3"/>
+      <!-- 60m Scale Bar: 60 * 1.8 = 108px (x=18..126) -->
+      <text x="72" y="16" fill="#e2e8f0" font-size="9.5" font-weight="800" text-anchor="middle">60m (~200 ft)</text>
+      <line x1="18" y1="28" x2="126" y2="28" stroke="#f8fafc" stroke-width="2.8"/>
+      <line x1="18" y1="22" x2="18" y2="33" stroke="#f8fafc" stroke-width="2"/>
+      <line x1="72" y1="24" x2="72" y2="31" stroke="#94a3b8" stroke-width="1.5"/>
+      <line x1="126" y1="22" x2="126" y2="33" stroke="#f8fafc" stroke-width="2"/>
+      <text x="18" y="42" fill="#94a3b8" font-size="7.5" font-weight="700" text-anchor="middle">0</text>
+      <text x="72" y="42" fill="#94a3b8" font-size="7.5" font-weight="700" text-anchor="middle">30m</text>
+      <text x="126" y="42" fill="#94a3b8" font-size="7.5" font-weight="700" text-anchor="middle">60m</text>
+      <!-- Divider -->
+      <line x1="146" y1="8" x2="146" y2="40" stroke="#334155" stroke-width="1.2"/>
+      <!-- Compass Rose -->
+      <g transform="translate(179, 29.5)">
+        <circle cx="0" cy="0" r="11.5" fill="none" stroke="#334155" stroke-width="1.2"/>
+        <polygon points="0,-10.5 3,-2 0,-4 -3,-2" fill="#60a5fa"/>
+        <polygon points="0,10.5 3,2 0,4 -3,2" fill="#64748b"/>
+        <polygon points="10,0 2,-2.6 3.5,0 2,2.6" fill="#64748b"/>
+        <polygon points="-10,0 -2,-2.6 -3.5,0 -2,2.6" fill="#64748b"/>
+        <text x="0" y="-14" fill="#60a5fa" font-size="8.5" font-weight="900" text-anchor="middle">N</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Crisp Arena Border Frame -->
+  <rect x="60" y="74" width="1080" height="684" rx="12" fill="none" stroke="#64748b" stroke-width="2.8"/>
+
+  <!-- Legend Footer -->
+  <g transform="translate(60, 788)">
+    <rect x="0" y="0" width="1080" height="40" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+
+    <circle cx="22" cy="20" r="6.5" fill="none" stroke="#facc15" stroke-width="2" stroke-dasharray="3 2"/>
+    <text x="35" y="23.5" fill="#e2e8f0" font-size="10" font-weight="700">Glider Ring (135m)</text>
+
+    <circle cx="164" cy="20" r="6.5" fill="none" stroke="#c084fc" stroke-width="2.2" stroke-dasharray="4 2"/>
+    <text x="177" y="23.5" fill="#e2e8f0" font-size="10" font-weight="700">Storm Safe Zone</text>
+
+    <polygon points="292,13 299,26 285,26" fill="#facc15"/>
+    <text x="307" y="23.5" fill="#e2e8f0" font-size="10" font-weight="700">Supply Drops (6)</text>
+
+    <rect x="418" y="14" width="14" height="12" rx="2" fill="#bae6fd" stroke="#0284c7" stroke-width="1.4"/>
+    <text x="439" y="23.5" fill="#e2e8f0" font-size="10" font-weight="700">Skybridge (+4.2m)</text>
+
+    <path d="M 556 26 L 563 13 L 569 19 L 575 13 L 582 26 Z" fill="#f8fafc" stroke="#38bdf8" stroke-width="1.3"/>
+    <text x="589" y="23.5" fill="#e2e8f0" font-size="10" font-weight="700">Shoreline Tent (+18m)</text>
+
+    <rect x="724" y="14" width="15" height="12" rx="3" fill="#f1f5f9" stroke="#3b82f6" stroke-width="1.4"/>
+    <text x="746" y="23.5" fill="#e2e8f0" font-size="10" font-weight="700">Dragonscale Roof</text>
+
+    <rect x="858" y="14" width="16" height="12" rx="2" fill="#238636" stroke="#86efac" stroke-width="1.3"/>
+    <text x="881" y="23.5" fill="#e2e8f0" font-size="10" font-weight="700">Athletic Field</text>
+
+    <rect x="978" y="14" width="8" height="12" rx="1.5" fill="#38bdf8"/>
+    <text x="993" y="23.5" fill="#e2e8f0" font-size="10" font-weight="700">Creek &amp; Trail</text>
+  </g>
+</svg>

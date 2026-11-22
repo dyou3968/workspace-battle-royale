@@ -1,0 +1,1144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Workspace Royale — Google Workspace Product AI Battle Royale</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta
+      name="description"
+      content="Workspace Royale — 3D Google Workspace Product Icon AI Battle Royale across the 3× Mountain View Googleplex campus. Drop in with 6 Product AIs, 5 bespoke skinned weapons, and 4 play modes."
+    />
+    <meta name="theme-color" content="#1A73E8" />
+    <meta property="og:title" content="Workspace Royale — Google Workspace Product AI Battle Royale" />
+    <meta
+      property="og:description"
+      content="3D Battle Royale across the 3× Mountain View Googleplex featuring 6 embodied Google Workspace Product Icon AIs, bespoke skinned weapons, Tier 1–3 loot chests, and 4 play modes."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://workspace-battle-royale.davidyou.com" />
+  </head>
+  <body>
+    <div id="game-root">
+      <div id="game-viewport" class="game-viewport"></div>
+
+      <!-- GOOGLE WORKSPACE MATERIAL DESIGN 3 LIVE 3D SPLASH SCREEN -->
+      <div id="splash-overlay" class="splash-overlay active" aria-label="Workspace Royale Live Preview">
+        <!-- Subtle top & bottom edge scrims only (keeps center ~80% crystal-clear for live 3D gameplay) -->
+        <div class="splash-scrim splash-scrim-top" aria-hidden="true"></div>
+        <div class="splash-scrim splash-scrim-bottom" aria-hidden="true"></div>
+
+        <!-- Crisp Frosted Google Workspace Preload Veil (fades out cleanly at 100%) -->
+        <div id="splash-preload-veil" class="splash-preload-veil" aria-live="polite">
+          <div class="splash-preload-card">
+            <div class="splash-preload-brand">
+              <span class="splash-preload-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="32" height="32" fill="none">
+                  <rect x="2.5" y="2.5" width="8.5" height="8.5" rx="2.6" fill="#4285F4" />
+                  <rect x="13" y="2.5" width="8.5" height="8.5" rx="2.6" fill="#EA4335" />
+                  <rect x="2.5" y="13" width="8.5" height="8.5" rx="2.6" fill="#FBBC04" />
+                  <rect x="13" y="13" width="8.5" height="8.5" rx="2.6" fill="#34A853" />
+                </svg>
+              </span>
+              <div class="splash-preload-titles">
+                <div class="splash-preload-title">Workspace Royale</div>
+                <div class="splash-preload-sub">Google Workspace Product AI Battle Royale</div>
+              </div>
+            </div>
+            <div class="splash-preload-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="splash-preload-progressbar">
+              <div id="splash-preload-fill" class="splash-preload-fill"></div>
+            </div>
+            <div class="splash-preload-meta">
+              <span id="splash-preload-caption" class="splash-preload-caption">Loading Mountain View Campus · 0/50</span>
+              <span id="splash-preload-pct" class="splash-preload-pct">0%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Full-Bleed Unobstructed Edge Chrome -->
+        <div class="splash-chrome">
+          <!-- Top Row: Floating Brand Pill (Left) & Arena Meta Pill (Right) -->
+          <div class="splash-top-row">
+            <div id="splash-brand-pill" class="splash-brand-pill">
+              <span class="ws-brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+                  <rect x="2.5" y="2.5" width="8.5" height="8.5" rx="2.6" fill="#4285F4" />
+                  <rect x="13" y="2.5" width="8.5" height="8.5" rx="2.6" fill="#EA4335" />
+                  <rect x="2.5" y="13" width="8.5" height="8.5" rx="2.6" fill="#FBBC04" />
+                  <rect x="13" y="13" width="8.5" height="8.5" rx="2.6" fill="#34A853" />
+                </svg>
+              </span>
+              <span class="brand-wordmark">
+                <span class="brand-ws">Workspace</span>
+                <span class="brand-royale">Royale</span>
+              </span>
+              <span class="splash-pill-divider" aria-hidden="true"></span>
+              <span class="splash-live-badge">
+                <span class="splash-live-dot" aria-hidden="true"></span>
+                <span>Live Gameplay</span>
+              </span>
+            </div>
+
+            <div id="splash-meta-pill" class="splash-meta-pill">
+              <span class="splash-arena-text">Mountain View Googleplex · 3× Arena</span>
+              <span class="splash-pill-divider" aria-hidden="true"></span>
+              <span id="splash-asset-badge" class="splash-asset-badge">Loading 3D...</span>
+              <button
+                type="button"
+                id="btn-splash-mute"
+                class="splash-mute-btn"
+                title="Mute Audio"
+                aria-label="Toggle Mute Audio"
+                aria-pressed="false"
+              >
+                <svg class="icon-sound-on" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3.5 8.2h2.8l4-3.2v10l-4-3.2H3.5z" />
+                  <path d="M13.2 7.5a3.8 3.8 0 0 1 0 5M15.4 5.5a6.5 6.5 0 0 1 0 9" />
+                </svg>
+                <svg class="icon-sound-off" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3.5 8.2h2.8l4-3.2v10l-4-3.2H3.5z" />
+                  <path d="M13 7.5l4.2 5M17.2 7.5l-4.2 5" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Bottom Row: Live Preview Progress Pill (Left) & Entry Action Card (Right) -->
+          <div class="splash-bottom-row">
+            <div id="splash-scene-card" class="splash-scene-card">
+              <div id="splash-scene-bars" class="splash-scene-bars" role="group" aria-label="Live Gameplay Preview Progress">
+                <button type="button" class="splash-scene-bar is-active" data-scene-index="0" aria-label="Preview segment 1" aria-current="true">
+                  <span class="splash-scene-bar-track"><span class="splash-scene-bar-fill"></span></span>
+                </button>
+                <button type="button" class="splash-scene-bar" data-scene-index="1" aria-label="Preview segment 2" aria-current="false">
+                  <span class="splash-scene-bar-track"><span class="splash-scene-bar-fill"></span></span>
+                </button>
+                <button type="button" class="splash-scene-bar" data-scene-index="2" aria-label="Preview segment 3" aria-current="false">
+                  <span class="splash-scene-bar-track"><span class="splash-scene-bar-fill"></span></span>
+                </button>
+                <button type="button" class="splash-scene-bar" data-scene-index="3" aria-label="Preview segment 4" aria-current="false">
+                  <span class="splash-scene-bar-track"><span class="splash-scene-bar-fill"></span></span>
+                </button>
+              </div>
+            </div>
+
+            <div id="splash-cta-card" class="splash-cta-card">
+              <div class="splash-cta-eyebrow">
+                <span class="dot blue"></span>
+                <span class="dot red"></span>
+                <span class="dot yellow"></span>
+                <span class="dot green"></span>
+                <span>Google Workspace Product AI Royale</span>
+              </div>
+              <h1 class="splash-cta-title">Ready to Drop In?</h1>
+              <p class="splash-cta-desc">
+                Choose your Play Mode, Product AI, and Settings — or jump straight into Battle Royale.
+              </p>
+              <div class="splash-cta-actions">
+                <button type="button" id="btn-splash-start" class="btn-primary splash-btn-start" disabled>
+                  Loading 3D Campus (0%)...
+                </button>
+                <button type="button" id="btn-splash-quickplay" class="btn-tonal splash-btn-quickplay" disabled>
+                  Quick Play
+                </button>
+              </div>
+              <div class="splash-cta-hint">
+                Press <b>Enter</b> or <b>Space</b> to continue
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- GOOGLE WORKSPACE MATERIAL DESIGN 3 MENU SHELL -->
+      <div id="lobby-overlay" class="overlay hidden">
+        <div class="menu-shell" id="menu-shell">
+          <!-- PINNED 60PX GOOGLE WORKSPACE TOP APP BAR -->
+          <header class="menu-topbar">
+            <button type="button" id="nav-brand-home" class="brand-home-btn" title="Return to Home">
+              <span class="ws-brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+                  <rect x="2.5" y="2.5" width="8.5" height="8.5" rx="2.6" fill="#4285F4" />
+                  <rect x="13" y="2.5" width="8.5" height="8.5" rx="2.6" fill="#EA4335" />
+                  <rect x="2.5" y="13" width="8.5" height="8.5" rx="2.6" fill="#FBBC04" />
+                  <rect x="13" y="13" width="8.5" height="8.5" rx="2.6" fill="#34A853" />
+                </svg>
+              </span>
+              <span class="brand-wordmark">
+                <span class="brand-ws">Workspace</span>
+                <span class="brand-royale">Royale</span>
+              </span>
+            </button>
+
+            <nav class="menu-nav-tabs" id="menu-nav-tabs" aria-label="Main Menu">
+              <button type="button" class="menu-tab active" data-page="home">
+                <svg class="tab-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 9.5L10 3.5L17 9.5" />
+                  <path d="M5 8.2V16.5H15V8.2" />
+                </svg>
+                <span>Home</span>
+              </button>
+              <button type="button" class="menu-tab" data-page="modes">
+                <svg class="tab-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="3" width="6" height="6" rx="1.5" />
+                  <rect x="11" y="3" width="6" height="6" rx="1.5" />
+                  <rect x="3" y="11" width="6" height="6" rx="1.5" />
+                  <rect x="11" y="11" width="6" height="6" rx="1.5" />
+                </svg>
+                <span>Play Modes</span>
+              </button>
+              <button type="button" class="menu-tab" data-page="characters">
+                <svg class="tab-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="10" cy="6.8" r="3.2" />
+                  <path d="M4.2 16.5C5 13.6 7.2 12.2 10 12.2C12.8 12.2 15 13.6 15.8 16.5" />
+                </svg>
+                <span>Product AIs</span>
+              </button>
+              <button type="button" class="menu-tab" data-page="settings">
+                <svg class="tab-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <line x1="3.5" y1="5.5" x2="16.5" y2="5.5" />
+                  <circle cx="7.5" cy="5.5" r="1.8" fill="currentColor" stroke="none" />
+                  <line x1="3.5" y1="10" x2="16.5" y2="10" />
+                  <circle cx="13" cy="10" r="1.8" fill="currentColor" stroke="none" />
+                  <line x1="3.5" y1="14.5" x2="16.5" y2="14.5" />
+                  <circle cx="9" cy="14.5" r="1.8" fill="currentColor" stroke="none" />
+                </svg>
+                <span>Settings</span>
+              </button>
+            </nav>
+
+            <!-- Shown only when Settings is opened mid-match from Pause -->
+            <div class="inmatch-settings-banner hidden" id="inmatch-settings-banner">
+              <span class="inmatch-pill">In-Match Settings</span>
+              <button type="button" id="btn-inmatch-back" class="btn-inmatch-back">← Back to Pause</button>
+            </div>
+
+            <div class="topbar-right">
+              <div class="asset-status-chip" id="asset-status-chip" aria-live="polite">
+                <span class="status-chip-dot"></span>
+                <span id="asset-chip-text">Loading 3D assets 0%</span>
+                <span class="chip-mini-track" id="chip-mini-track">
+                  <span class="chip-mini-fill" id="chip-mini-fill"></span>
+                </span>
+              </div>
+
+              <button
+                type="button"
+                id="btn-topbar-splash"
+                class="topbar-pill-btn"
+                title="Watch Live 3D Gameplay Preview"
+                aria-label="Watch Live 3D Gameplay Preview"
+              >
+                <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="10" cy="10" r="7.5" />
+                  <polygon points="8.5,6.8 14,10 8.5,13.2" fill="currentColor" stroke="none" />
+                </svg>
+                <span>Preview</span>
+              </button>
+
+              <button
+                type="button"
+                id="btn-topbar-settings"
+                class="topbar-icon-btn"
+                title="Open Settings"
+                aria-label="Open Settings"
+              >
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+              </button>
+            </div>
+          </header>
+
+          <!-- COMPACT ASSET PRELOAD PROGRESS BAR (collapses cleanly at 100%) -->
+          <div id="asset-preload-bar" class="preload-bar">
+            <div class="preload-top">
+              <span id="preload-label" class="preload-label">Initializing 3D Mountain View campus assets...</span>
+              <span id="preload-pct" class="preload-pct">0%</span>
+            </div>
+            <div class="preload-track">
+              <div id="preload-fill" class="preload-fill"></div>
+            </div>
+          </div>
+
+          <!-- PAGE VIEWPORT -->
+          <div class="menu-page-viewport">
+            <!-- ==================== PAGE 1: HOME (AAA LOBBY LAYOUT) ==================== -->
+            <section class="menu-page active" id="page-home" data-page-view="home">
+              <div class="home-layout">
+                <!-- Left / Main Stage (~60%): Live 3D Google Studio Hero Showcase -->
+                <div class="home-stage-col">
+                  <div class="showcase-card home-showcase-card">
+                    <div class="showcase-slot home-showcase-slot" id="home-showcase-slot">
+                      <!-- Single Live WebGL 3D Turntable (reparented cleanly between Home & Product AIs) -->
+                      <div class="preview-stage" id="preview-stage">
+                        <canvas id="hero-preview-canvas" width="600" height="440"></canvas>
+                        <div class="preview-tag" id="preview-tag">Gmail AI · Workspace Product AI</div>
+                        <div class="preview-role" id="preview-role">Autonomous Inbox Striker AI</div>
+                        <div class="preview-showcase-pill" id="preview-showcase-pill">✦ Tactical Sweep · Arctic Apex (Vanguard M4)</div>
+                        <div class="preview-controls">
+                          <span class="preview-hint">↔ Drag to rotate 360°</span>
+                          <button type="button" id="btn-flip-preview" class="btn-flip">Inspect Back</button>
+                        </div>
+                        <div id="preview-loading-pill" class="preview-loading-pill">Loading 3D Model...</div>
+                      </div>
+                    </div>
+                    <div class="home-hero-strip">
+                      <div class="home-strip-info">
+                        <div class="home-strip-name" id="home-strip-hero-name">Gmail AI</div>
+                        <div class="home-strip-ult" id="home-strip-ult-name">Ultimate [Q]: Reply-All Barrage</div>
+                      </div>
+                      <button type="button" id="btn-home-customize" class="btn-tonal btn-sm">
+                        Customize AI
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Right Action Dock (~40%): Title, Loadout Selectors & Bottom-Anchored Play CTA -->
+                <div class="home-dock-col">
+                  <div class="home-hero-copy">
+                    <div class="home-brand-kicker">
+                      <span class="dot blue"></span>
+                      <span class="dot red"></span>
+                      <span class="dot yellow"></span>
+                      <span class="dot green"></span>
+                      <span>Google Workspace</span>
+                    </div>
+                    <h1 class="home-title">Workspace Royale</h1>
+                    <p class="home-subtitle">Mountain View Googleplex · 3× Campus Arena</p>
+                    <div class="home-meta-chips" aria-label="Match Rules">
+                      <span class="meta-chip">135m Sky Drop</span>
+                      <span class="meta-chip">Unarmed Start</span>
+                      <span class="meta-chip">Tier 1–3 Chests</span>
+                    </div>
+                  </div>
+
+                  <!-- 2 Clean Interactive Material 3 Loadout Selector Rows -->
+                  <div class="home-selector-stack">
+                    <!-- 1. Play Mode Selector Row -->
+                    <button type="button" id="home-card-mode" class="home-selector-row">
+                      <span class="selector-color-bar" id="home-mode-accent"></span>
+                      <div class="selector-body">
+                        <div class="selector-kicker-row">
+                          <span class="selector-kicker">Play Mode</span>
+                          <span class="home-mode-badge" id="home-mode-badge">Classic 20</span>
+                        </div>
+                        <div class="selector-title" id="home-mode-name">Battle Royale</div>
+                        <div class="selector-desc" id="home-mode-tagline">
+                          The signature Mountain View Googleplex survival showdown.
+                        </div>
+                      </div>
+                      <span class="selector-chevron" aria-hidden="true">›</span>
+                    </button>
+
+                    <!-- 2. Product AI Selector Row -->
+                    <button type="button" id="home-card-hero" class="home-selector-row">
+                      <div class="ws-product-tile home-selector-icon" id="home-hero-badge"></div>
+                      <div class="selector-body">
+                        <div class="selector-kicker-row">
+                          <span class="selector-kicker">Product AI</span>
+                        </div>
+                        <div class="selector-title" id="home-hero-name">Gmail AI</div>
+                        <div class="selector-desc" id="home-hero-meta">
+                          Reply-All Barrage · Tactical Sweep
+                        </div>
+                      </div>
+                      <span class="selector-chevron" aria-hidden="true">›</span>
+                    </button>
+                  </div>
+
+                  <!-- Bottom-Anchored Primary Play CTA + Subtle Utility Links (Zero inline settings) -->
+                  <div class="home-play-dock">
+                    <button type="button" id="btn-home-play" class="btn-primary btn-play-hero" disabled>
+                      Loading 3D assets (0%)...
+                    </button>
+
+                    <div class="home-utility-links">
+                      <button type="button" id="home-card-settings" class="btn-utility-link">
+                        <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <circle cx="10" cy="10" r="2.6" />
+                          <path d="M16.2 12.5a1.4 1.4 0 0 0 .28 1.54l.05.05a1.7 1.7 0 1 1-2.4 2.4l-.05-.05a1.4 1.4 0 0 0-1.54-.28 1.4 1.4 0 0 0-.84 1.28v.08a1.7 1.7 0 1 1-3.4 0v-.08a1.4 1.4 0 0 0-.84-1.28 1.4 1.4 0 0 0-1.54.28l-.05.05a1.7 1.7 0 1 1-2.4-2.4l.05-.05a1.4 1.4 0 0 0 .28-1.54 1.4 1.4 0 0 0-1.28-.84h-.08a1.7 1.7 0 1 1 0-3.4h.08a1.4 1.4 0 0 0 1.28-.84 1.4 1.4 0 0 0-.28-1.54l-.05-.05a1.7 1.7 0 1 1 2.4-2.4l.05.05a1.4 1.4 0 0 0 1.54.28h.06a1.4 1.4 0 0 0 .78-1.28v-.08a1.7 1.7 0 1 1 3.4 0v.08a1.4 1.4 0 0 0 .84 1.28 1.4 1.4 0 0 0 1.54-.28l.05-.05a1.7 1.7 0 1 1 2.4 2.4l-.05.05a1.4 1.4 0 0 0-.28 1.54v.06a1.4 1.4 0 0 0 1.28.78h.08a1.7 1.7 0 1 1 0 3.4h-.08a1.4 1.4 0 0 0-1.28.84z" />
+                        </svg>
+                        <span>Settings</span>
+                      </button>
+                      <button type="button" id="home-btn-controls" class="btn-utility-link">
+                        <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <rect x="2.2" y="5" width="15.6" height="10" rx="2.2" />
+                          <path d="M5.5 8.5h1M8.5 8.5h1M11.5 8.5h1M14.5 8.5h0.5M6.5 11.8h7" />
+                        </svg>
+                        <span>Controls</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ==================== PAGE 2: PLAY MODES ==================== -->
+            <section class="menu-page menu-page-modes hidden" id="page-modes" data-page-view="modes">
+              <div class="modes-body" id="modes-body">
+                <div class="page-header">
+                  <div>
+                    <span class="page-eyebrow">Mountain View Campus Rulesets</span>
+                    <h2>Play Modes</h2>
+                    <p class="page-subtitle">
+                      Choose how you drop into the 3× Googleplex — classic survival, fast-paced Blitz, sniper duels, or storm-free campus exploration.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="mode-grid" id="mode-grid"></div>
+              </div>
+
+              <div class="page-footer-bar modes-footer">
+                <button type="button" id="btn-modes-back" class="btn-outlined btn-inline">← Back</button>
+                <button type="button" id="btn-modes-play" class="btn-primary btn-inline-primary" disabled>
+                  Loading 3D assets (0%)...
+                </button>
+              </div>
+            </section>
+
+            <!-- ==================== PAGE 3: PRODUCT AIs (ROSTER GALLERY) ==================== -->
+            <section class="menu-page hidden" id="page-characters" data-page-view="characters">
+              <div class="characters-layout">
+                <!-- Left (~46%): 2x3 Roster Gallery (Zero settings panels) -->
+                <div class="characters-left">
+                  <div class="characters-header">
+                    <h2>Workspace Product AIs</h2>
+                    <p class="characters-sub">Shared base stats · Unique Ultimate [Q]</p>
+                  </div>
+                  <div class="hero-grid" id="hero-grid"></div>
+                  <div class="characters-keytip">
+                    <span class="ws-keycap keycap-mini">1–6</span>
+                    <span>Preview Product AIs</span>
+                    <span class="keytip-sep">·</span>
+                    <span>Drag 3D showcase to inspect 360°</span>
+                  </div>
+                </div>
+
+                <!-- Right (~54%): Reparented 3D Studio Showcase + Material 3 Hero Detail Card -->
+                <div class="hero-details" id="hero-details">
+                  <div class="showcase-slot characters-showcase-slot" id="characters-showcase-slot"></div>
+
+                  <div class="hero-info-panel">
+                    <div class="hero-title-row">
+                      <div class="ws-product-tile detail-hero-icon" id="detail-hero-icon"></div>
+                      <div class="hero-title-wrap">
+                        <h2 id="detail-hero-name">Gmail AI</h2>
+                        <p id="detail-hero-tagline" class="hero-tagline"></p>
+                      </div>
+                    </div>
+
+                    <div class="ultimate-box" id="detail-ult-box">
+                      <div class="ult-header">
+                        <span class="ult-badge">Ultimate [Q]</span>
+                        <span id="detail-ult-cost" class="ult-cost">100 Mana · 16s CD</span>
+                      </div>
+                      <h3 id="detail-ult-name">Reply-All Barrage</h3>
+                      <p id="detail-ult-desc"></p>
+                    </div>
+
+                    <div class="characters-actions">
+                      <button type="button" id="btn-chars-back" class="btn-outlined btn-inline">← Back</button>
+                      <button type="button" id="btn-chars-play" class="btn-primary btn-inline-primary" disabled>
+                        Loading 3D assets (0%)...
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ==================== PAGE 4: CATEGORIZED SETTINGS (TWO-PANE SIDEBAR) ==================== -->
+            <section class="menu-page menu-page-settings hidden" id="page-settings" data-page-view="settings">
+              <div class="settings-workspace">
+                <!-- Left Vertical Category Sidebar (220px) -->
+                <aside class="settings-sidebar" role="tablist" aria-label="Settings Categories">
+                  <div class="settings-sidebar-heading">Settings</div>
+                  <button
+                    type="button"
+                    class="settings-nav-btn active"
+                    role="tab"
+                    aria-selected="true"
+                    data-settings-tab="gameplay"
+                  >
+                    <svg class="settings-nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="2.5" y="6" width="15" height="8.5" rx="3.5" />
+                      <path d="M6.5 8.8v2.9M5 10.25h3" />
+                      <circle cx="13.2" cy="9.5" r="0.8" fill="currentColor" stroke="none" />
+                      <circle cx="14.9" cy="11.1" r="0.8" fill="currentColor" stroke="none" />
+                    </svg>
+                    <span>Gameplay</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-nav-btn"
+                    role="tab"
+                    aria-selected="false"
+                    data-settings-tab="video"
+                  >
+                    <svg class="settings-nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="2.5" y="3.5" width="15" height="10.5" rx="2" />
+                      <path d="M7 16.5h6M10 14v2.5" />
+                    </svg>
+                    <span>Video</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-nav-btn"
+                    role="tab"
+                    aria-selected="false"
+                    data-settings-tab="audio"
+                  >
+                    <svg class="settings-nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M3.5 8.2h2.8l4-3.2v10l-4-3.2H3.5z" />
+                      <path d="M13.2 7.5a3.8 3.8 0 0 1 0 5M15.4 5.5a6.5 6.5 0 0 1 0 9" />
+                    </svg>
+                    <span>Audio</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-nav-btn"
+                    role="tab"
+                    aria-selected="false"
+                    data-settings-tab="controls"
+                  >
+                    <svg class="settings-nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="2.2" y="5" width="15.6" height="10" rx="2.2" />
+                      <path d="M5.5 8.5h1M8.5 8.5h1M11.5 8.5h1M14.5 8.5h0.5M6.5 11.8h7" />
+                    </svg>
+                    <span>Controls</span>
+                  </button>
+                </aside>
+
+                <!-- Right Structured Settings Content Pane -->
+                <div class="settings-content" id="settings-content">
+                  <!-- TAB 1: GAMEPLAY -->
+                  <div class="settings-panel active" id="settings-ai" data-settings-panel="gameplay" role="tabpanel">
+                    <div class="settings-panel-header">
+                      <h2>Gameplay</h2>
+                      <p>Match &amp; AI difficulty preferences</p>
+                    </div>
+
+                    <div class="setting-row-block">
+                      <div class="setting-row-head">
+                        <div class="setting-label">Bot Intelligence</div>
+                        <div class="setting-sub">
+                          Select the skill tier of autonomous Workspace Product AI rivals across the campus.
+                        </div>
+                      </div>
+
+                      <div class="difficulty-grid" id="bot-difficulty-grid">
+                        <button type="button" class="diff-btn" data-diff="casual">
+                          <span class="diff-name">Casual</span>
+                          <span class="diff-tier">Intern</span>
+                        </button>
+                        <button type="button" class="diff-btn selected" data-diff="tactical">
+                          <span class="diff-name">Tactical</span>
+                          <span class="diff-tier">Staff</span>
+                        </button>
+                        <button type="button" class="diff-btn" data-diff="pro">
+                          <span class="diff-name">Pro</span>
+                          <span class="diff-tier">Distinguished</span>
+                        </button>
+                        <button type="button" class="diff-btn" data-diff="mixed">
+                          <span class="diff-name">Mixed</span>
+                          <span class="diff-tier">All Tiers</span>
+                        </button>
+                      </div>
+
+                      <div id="bot-difficulty-summary" class="diff-summary-card">
+                        Tactical (Staff): Velocity-lead aim (±1.1m), cover peeking &amp; heals, contextual Ultimates.
+                      </div>
+
+                      <p id="settings-practice-note" class="settings-info-note hidden">
+                        Campus Free Roam always spawns 6 Intern sparring bots regardless of this setting.
+                      </p>
+                    </div>
+                  </div>
+
+                  <!-- TAB 2: VIDEO -->
+                  <div class="settings-panel hidden" id="settings-graphics" data-settings-panel="video" role="tabpanel">
+                    <div class="settings-panel-header">
+                      <h2>Video</h2>
+                      <p>Rendering quality &amp; performance display</p>
+                    </div>
+
+                    <div class="setting-row-block">
+                      <div class="setting-row-head-inline">
+                        <div>
+                          <div class="setting-label">Graphics Quality</div>
+                          <div class="setting-sub">
+                            Adjust render pixel density, shadow map resolution, and campus draw distance.
+                          </div>
+                        </div>
+                        <span class="setting-detail-pill" id="settings-quality-sub">
+                          Balanced · 1.25× DPR · 1536 Shadows
+                        </span>
+                      </div>
+
+                      <div class="quality-segmented" data-quality-group="settings">
+                        <button type="button" class="quality-btn" data-quality="performance">Performance</button>
+                        <button type="button" class="quality-btn selected" data-quality="balanced">Balanced</button>
+                        <button type="button" class="quality-btn" data-quality="high">High</button>
+                      </div>
+                    </div>
+
+                    <div class="setting-row-block">
+                      <label class="setting-toggle-row" for="setting-show-perf-hud">
+                        <span class="setting-toggle-meta">
+                          <span class="setting-label">Performance Telemetry HUD</span>
+                          <span class="setting-sub">
+                            Show real-time frame rate (FPS) and render draw-call pill during matches.
+                          </span>
+                        </span>
+                        <span class="toggle-switch">
+                          <input type="checkbox" id="setting-show-perf-hud" checked />
+                          <span class="toggle-slider"></span>
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <!-- TAB 3: AUDIO -->
+                  <div class="settings-panel hidden" id="settings-audio" data-settings-panel="audio" role="tabpanel">
+                    <div class="settings-panel-header">
+                      <h2>Audio</h2>
+                      <p>Weapons, Ultimates, footsteps &amp; sky-drop wind</p>
+                    </div>
+
+                    <div class="setting-row-block" id="setting-volume-row">
+                      <div class="setting-slider-top">
+                        <div>
+                          <label class="setting-label" for="setting-master-volume">Master Volume</label>
+                          <div class="setting-sub">Overall output gain for all combat SFX and ambient audio.</div>
+                        </div>
+                        <div class="audio-controls-right">
+                          <span class="setting-value-pill" id="val-master-volume">100%</span>
+                          <button type="button" id="btn-test-audio" class="btn-outlined btn-sm btn-test-sound">
+                            <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                              <path d="M3.5 8.2h2.8l4-3.2v10l-4-3.2H3.5z" />
+                              <path d="M13.5 7.5a3.5 3.5 0 0 1 0 5" />
+                            </svg>
+                            <span>Test Sound</span>
+                          </button>
+                        </div>
+                      </div>
+                      <input
+                        type="range"
+                        id="setting-master-volume"
+                        class="setting-slider"
+                        min="0"
+                        max="100"
+                        step="5"
+                        value="100"
+                      />
+                    </div>
+
+                    <div class="setting-row-block">
+                      <label class="setting-toggle-row" for="setting-muted">
+                        <span class="setting-toggle-meta">
+                          <span class="setting-label">Mute All Audio</span>
+                          <span class="setting-sub">Immediately silence all sound effects and sky-drop wind.</span>
+                        </span>
+                        <span class="toggle-switch">
+                          <input type="checkbox" id="setting-muted" />
+                          <span class="toggle-slider"></span>
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <!-- TAB 4: CONTROLS -->
+                  <div class="settings-panel hidden" id="settings-controls" data-settings-panel="controls" role="tabpanel">
+                    <div class="settings-panel-header">
+                      <h2>Controls</h2>
+                      <p>Mouse aim sensitivity &amp; keybindings</p>
+                    </div>
+
+                    <div class="setting-row-block">
+                      <div class="setting-slider-top">
+                        <div>
+                          <label class="setting-label" for="setting-mouse-sens">Mouse Sensitivity</label>
+                          <div class="setting-sub">Horizontal &amp; vertical hip-fire camera turn speed.</div>
+                        </div>
+                        <span class="setting-value-pill" id="val-mouse-sens">1.00×</span>
+                      </div>
+                      <input
+                        type="range"
+                        id="setting-mouse-sens"
+                        class="setting-slider"
+                        min="0.4"
+                        max="2.2"
+                        step="0.05"
+                        value="1.0"
+                      />
+                    </div>
+
+                    <div class="setting-row-block">
+                      <div class="setting-slider-top">
+                        <div>
+                          <label class="setting-label" for="setting-ads-sens">ADS / Scope Sensitivity</label>
+                          <div class="setting-sub">Aim-down-sights and Longbow 4× scope multiplier.</div>
+                        </div>
+                        <span class="setting-value-pill" id="val-ads-sens">1.00×</span>
+                      </div>
+                      <input
+                        type="range"
+                        id="setting-ads-sens"
+                        class="setting-slider"
+                        min="0.4"
+                        max="2.0"
+                        step="0.05"
+                        value="1.0"
+                      />
+                    </div>
+
+                    <div class="setting-row-block">
+                      <label class="setting-toggle-row" for="setting-invert-y">
+                        <span class="setting-toggle-meta">
+                          <span class="setting-label">Invert Y-Axis</span>
+                          <span class="setting-sub">Reverse vertical mouse look direction.</span>
+                        </span>
+                        <span class="toggle-switch">
+                          <input type="checkbox" id="setting-invert-y" />
+                          <span class="toggle-slider"></span>
+                        </span>
+                      </label>
+                    </div>
+
+                    <!-- Grouped Standard Keybindings Table -->
+                    <div class="keybindings-section">
+                      <h3 class="keybindings-heading">Keybindings</h3>
+                      <div class="keybindings-groups">
+                        <div class="keybind-group">
+                          <div class="keybind-group-title">Movement</div>
+                          <div class="keybind-row">
+                            <span class="keybind-action">Move / Steer Glider</span>
+                            <span class="ws-keycap">WASD</span>
+                          </div>
+                          <div class="keybind-row">
+                            <span class="keybind-action">Sprint / Sky Dive</span>
+                            <span class="ws-keycap">Shift</span>
+                          </div>
+                          <div class="keybind-row">
+                            <span class="keybind-action">Crouch &amp; Tighten Aim</span>
+                            <span class="ws-keycap">C / Ctrl</span>
+                          </div>
+                          <div class="keybind-row">
+                            <span class="keybind-action">Jump</span>
+                            <span class="ws-keycap">Space</span>
+                          </div>
+                        </div>
+
+                        <div class="keybind-group">
+                          <div class="keybind-group-title">Combat</div>
+                          <div class="keybind-row">
+                            <span class="keybind-action">Fire / Use Item</span>
+                            <span class="ws-keycap">LMB</span>
+                          </div>
+                          <div class="keybind-row">
+                            <span class="keybind-action">ADS / Sniper Scope</span>
+                            <span class="ws-keycap">RMB</span>
+                          </div>
+                          <div class="keybind-row">
+                            <span class="keybind-action">Reload Weapon</span>
+                            <span class="ws-keycap">R</span>
+                          </div>
+                          <div class="keybind-row">
+                            <span class="keybind-action">Product Ultimate</span>
+                            <span class="ws-keycap">Q</span>
+                          </div>
+                        </div>
+
+                        <div class="keybind-group">
+                          <div class="keybind-group-title">Equipment &amp; Interface</div>
+                          <div class="keybind-row">
+                            <span class="keybind-action">Open Chest / Loot</span>
+                            <span class="ws-keycap">E</span>
+                          </div>
+                          <div class="keybind-row">
+                            <span class="keybind-action">Hotbar Slots</span>
+                            <span class="ws-keycap">1–5</span>
+                          </div>
+                          <div class="keybind-row">
+                            <span class="keybind-action">Tactical Map</span>
+                            <span class="ws-keycap">M</span>
+                          </div>
+                          <div class="keybind-row">
+                            <span class="keybind-action">Pause / Back</span>
+                            <span class="ws-keycap">Esc</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Pinned Settings Footer Bar -->
+              <div class="settings-footer">
+                <div class="settings-footer-left">
+                  <button type="button" id="btn-settings-reset" class="btn-outlined btn-danger-outline btn-inline">
+                    Reset to Defaults
+                  </button>
+                  <span class="settings-saved-note" id="settings-saved-note">Changes save automatically</span>
+                </div>
+                <button type="button" id="btn-settings-done" class="btn-primary btn-inline-primary">
+                  Done
+                </button>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <!-- IN-GAME TACTICAL HUD -->
+      <div id="hud" class="hidden">
+        <!-- Longbow .308 Magnified Sniper Scope Overlay -->
+        <div id="sniper-scope-overlay" class="sniper-scope-overlay hidden" aria-hidden="true">
+          <div class="scope-vignette"></div>
+          <svg class="scope-svg" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid slice">
+            <defs>
+              <radialGradient id="scopeLensGlow" cx="50%" cy="50%" r="50%">
+                <stop offset="82%" stop-color="rgba(56, 189, 248, 0)" />
+                <stop offset="96%" stop-color="rgba(56, 189, 248, 0.14)" />
+                <stop offset="100%" stop-color="rgba(2, 6, 23, 0.96)" />
+              </radialGradient>
+              <mask id="scopeApertureMask">
+                <rect width="1000" height="1000" fill="white" />
+                <circle cx="500" cy="500" r="365" fill="black" />
+              </mask>
+            </defs>
+            <rect width="1000" height="1000" fill="rgba(2, 5, 12, 0.96)" mask="url(#scopeApertureMask)" />
+            <circle cx="500" cy="500" r="365" fill="url(#scopeLensGlow)" stroke="rgba(148, 163, 184, 0.45)" stroke-width="3" />
+            <circle cx="500" cy="500" r="356" fill="none" stroke="rgba(15, 23, 42, 0.9)" stroke-width="6" />
+            <line x1="135" y1="500" x2="340" y2="500" stroke="#090d16" stroke-width="4.5" />
+            <line x1="660" y1="500" x2="865" y2="500" stroke="#090d16" stroke-width="4.5" />
+            <line x1="500" y1="660" x2="500" y2="865" stroke="#090d16" stroke-width="4.5" />
+            <line x1="500" y1="135" x2="500" y2="340" stroke="#090d16" stroke-width="3" />
+            <line x1="340" y1="500" x2="660" y2="500" stroke="rgba(226, 232, 240, 0.8)" stroke-width="1.2" />
+            <line x1="500" y1="340" x2="500" y2="660" stroke="rgba(226, 232, 240, 0.8)" stroke-width="1.2" />
+            <g fill="#ef4444" stroke="rgba(254, 202, 202, 0.85)" stroke-width="0.6">
+              <circle cx="380" cy="500" r="2.6" />
+              <circle cx="410" cy="500" r="2.6" />
+              <circle cx="440" cy="500" r="2.6" />
+              <circle cx="470" cy="500" r="2.6" />
+              <circle cx="530" cy="500" r="2.6" />
+              <circle cx="560" cy="500" r="2.6" />
+              <circle cx="590" cy="500" r="2.6" />
+              <circle cx="620" cy="500" r="2.6" />
+              <circle cx="500" cy="410" r="2.6" />
+              <circle cx="500" cy="440" r="2.6" />
+              <circle cx="500" cy="470" r="2.6" />
+              <circle cx="500" cy="530" r="2.6" />
+              <circle cx="500" cy="560" r="2.6" />
+              <circle cx="500" cy="590" r="2.6" />
+              <circle cx="500" cy="620" r="2.6" />
+            </g>
+            <g stroke="rgba(226, 232, 240, 0.65)" stroke-width="1.2">
+              <line x1="488" y1="530" x2="512" y2="530" />
+              <line x1="484" y1="560" x2="516" y2="560" />
+              <line x1="478" y1="590" x2="522" y2="590" />
+            </g>
+            <circle cx="500" cy="500" r="3.2" fill="#facc15" />
+            <circle cx="500" cy="500" r="7" fill="none" stroke="rgba(250, 204, 21, 0.55)" stroke-width="1" />
+          </svg>
+          <div class="scope-telemetry">
+            <span>LONGBOW .308</span>
+            <span class="scope-mag">4.0× OPTIC</span>
+            <span>HEADSHOT 2.0×</span>
+          </div>
+        </div>
+
+        <!-- Screen-edge Status Vignettes -->
+        <div id="storm-vignette" class="storm-vignette hidden"></div>
+        <div id="low-hp-vignette" class="low-hp-vignette hidden"></div>
+
+        <!-- TOP LEFT: Authentic 2D Googleplex Minimap, Storm Status & Perf Telemetry -->
+        <div class="hud-top-left">
+          <div class="minimap-wrap">
+            <canvas id="minimap-canvas" width="240" height="152"></canvas>
+            <div class="minimap-north">N</div>
+            <div class="minimap-key-hint">M</div>
+            <div class="minimap-label" id="zone-name">STAN PLAZA</div>
+          </div>
+          <div class="storm-pill" id="storm-pill">
+            <span class="storm-dot"></span>
+            <span class="storm-phase-badge" id="storm-phase-badge">P1</span>
+            <span id="storm-status">Storm shrinking in 25s</span>
+          </div>
+          <div class="perf-pill perf-good" id="perf-pill">
+            <span class="perf-dot"></span>
+            <span id="perf-fps">60 FPS</span>
+            <span class="perf-sep">·</span>
+            <span id="perf-draws">0 draws</span>
+          </div>
+        </div>
+
+        <!-- TOP CENTER: Compass Bearing Strip, Match Stats, Sky-Drop Prompt & Banner -->
+        <div class="hud-top-center">
+          <div class="compass-wrap">
+            <canvas id="compass-canvas" width="340" height="30"></canvas>
+            <div class="compass-caret"></div>
+            <div class="compass-deg" id="compass-deg">000° N</div>
+          </div>
+
+          <div class="match-stats">
+            <div class="stat-box">
+              <span class="stat-label">MODE</span>
+              <span class="stat-mode" id="hud-mode-label">ROYALE</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-box">
+              <span class="stat-label">ALIVE</span>
+              <span class="stat-value" id="hud-alive">20</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-box">
+              <span class="stat-label">ELIMS</span>
+              <span class="stat-value" id="hud-elims">0</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-box">
+              <span class="stat-label">HEADSHOTS</span>
+              <span class="stat-value stat-gold" id="hud-headshots">0</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-box">
+              <span class="stat-label">AI TIER</span>
+              <span class="stat-tier" id="hud-bot-tier">STAFF</span>
+            </div>
+          </div>
+
+          <!-- Sky-Drop Glider HUD Prompt -->
+          <div id="skydrop-prompt" class="skydrop-prompt hidden">
+            <div class="skydrop-row">
+              <span class="skydrop-badge">SKY DROP</span>
+              <span class="skydrop-text">
+                ALTITUDE: <strong id="skydrop-alt">135m</strong> • <b>WASD</b> Steer · <b>SHIFT</b> Dive · Land &amp; Open Chests <b>[E]</b>
+              </span>
+            </div>
+            <div class="skydrop-bar-track">
+              <div id="skydrop-bar" class="skydrop-bar-fill"></div>
+            </div>
+          </div>
+
+          <div id="banner-toast" class="banner-toast hidden"></div>
+        </div>
+
+        <!-- TOP RIGHT: Kill Feed & Compact Controls Legend -->
+        <div class="hud-top-right">
+          <div id="kill-feed" class="kill-feed"></div>
+          <div class="controls-mini">
+            <span><b>WASD</b> Move</span>
+            <span><b>SHIFT</b> Sprint/Dive</span>
+            <span><b>C/CTRL</b> Crouch</span>
+            <span><b>SPACE</b> Jump</span>
+            <span><b>LMB</b> Fire/Use</span>
+            <span><b>RMB</b> ADS/Scope</span>
+            <span><b>E</b> Open Chest/Loot</span>
+            <span><b>Q</b> Ultimate</span>
+            <span><b>R</b> Reload</span>
+            <span><b>1–5</b> Slots</span>
+            <span><b>M</b> Map</span>
+            <span><b>ESC</b> Pause</span>
+          </div>
+        </div>
+
+        <!-- CENTER COMBAT OVERLAYS -->
+        <div id="damage-arc-layer" class="damage-arc-layer" aria-hidden="true"></div>
+
+        <div id="crosshair" class="crosshair">
+          <div class="ch-line ch-top"></div>
+          <div class="ch-line ch-bottom"></div>
+          <div class="ch-line ch-left"></div>
+          <div class="ch-line ch-right"></div>
+          <div class="ch-dot"></div>
+          <div id="hitmarker" class="hitmarker"></div>
+          <div id="crit-flash" class="crit-flash">HEADSHOT</div>
+        </div>
+
+        <div id="channel-ring" class="channel-ring hidden">
+          <svg class="channel-svg" viewBox="0 0 88 88">
+            <circle class="channel-track" cx="44" cy="44" r="36" />
+            <circle id="channel-arc" class="channel-arc" cx="44" cy="44" r="36" />
+          </svg>
+          <div class="channel-center">
+            <span id="channel-time" class="channel-time">1.5s</span>
+          </div>
+          <div id="channel-label" class="channel-label">Using Shield Cell...</div>
+        </div>
+
+        <div id="interact-prompt" class="interact-prompt hidden">
+          <span class="keycap">E</span>
+          <span id="interact-text">Pick up Rare Vanguard M4</span>
+        </div>
+
+        <div id="damage-layer" class="damage-layer"></div>
+
+        <!-- BOTTOM LEFT: Status Badges + Hero Card (Shield / Health / Mana & Ultimate Readiness) -->
+        <div class="hud-bottom-left">
+          <div id="status-badges" class="status-badges"></div>
+          <div class="hero-status-card" id="hero-status-card">
+            <div class="hero-status-main">
+              <div class="hero-avatar ws-product-tile" id="hud-hero-avatar"></div>
+              <div class="bars-stack">
+                <div class="hero-name-row">
+                  <span id="hud-hero-name">Gmail AI</span>
+                  <span class="ult-ready-pill" id="hud-ult-pill">Q · 40/100</span>
+                </div>
+                <div class="bar-row">
+                  <span class="bar-tag shield-tag">SHD</span>
+                  <div class="bar-track">
+                    <div class="bar-fill shield-fill" id="bar-shield"></div>
+                  </div>
+                  <span class="bar-num" id="num-shield">0</span>
+                </div>
+                <div class="bar-row">
+                  <span class="bar-tag health-tag">HP</span>
+                  <div class="bar-track">
+                    <div class="bar-fill health-fill" id="bar-health"></div>
+                  </div>
+                  <span class="bar-num" id="num-health">100</span>
+                </div>
+                <div class="bar-row mana-row" id="hud-mana-row">
+                  <span class="bar-tag mana-tag">MP</span>
+                  <div class="bar-track">
+                    <div class="bar-fill mana-fill" id="bar-mana"></div>
+                  </div>
+                  <span class="bar-num" id="num-mana">40</span>
+                </div>
+              </div>
+            </div>
+            <div class="hud-ult-callout" id="hud-ult-callout">
+              <span class="ult-callout-dot" aria-hidden="true"></span>
+              <span class="ult-callout-text" id="hud-ult-callout-text">[Q] Reply-All Barrage · Charge to 100 MP</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- BOTTOM RIGHT: Active Weapon Ammo / Reload Bar + 5-Slot Hotbar -->
+        <div class="hud-bottom-right">
+          <div class="active-item-wrap">
+            <div class="active-item-readout" id="active-item-readout">
+              <span id="active-item-name">Unarmed — Find &amp; Open Chests [E]</span>
+              <span id="active-item-ammo">NO WEAPON</span>
+            </div>
+            <div id="reload-bar-wrap" class="reload-bar-track hidden">
+              <div id="reload-bar-fill" class="reload-bar-fill"></div>
+            </div>
+          </div>
+          <div class="hotbar" id="hotbar"></div>
+        </div>
+      </div>
+
+      <!-- FULL TACTICAL CAMPUS MAP OVERLAY [M] -->
+      <div id="fullmap-overlay" class="overlay fullmap-overlay hidden">
+        <div class="fullmap-modal">
+          <div class="fullmap-header">
+            <div class="fullmap-title-group">
+              <span class="fullmap-badge">Tactical Map</span>
+              <h2>Mountain View Googleplex</h2>
+              <span class="fullmap-dims">600m × 380m</span>
+            </div>
+            <div class="fullmap-meta-group">
+              <span class="fullmap-meta-pill" id="fullmap-zone">Stan Plaza</span>
+              <span class="fullmap-meta-pill fullmap-storm-pill" id="fullmap-storm">P1 · 25s</span>
+              <span class="fullmap-meta-pill fullmap-wp-pill hidden" id="fullmap-waypoint-pill">
+                <span class="wp-diamond-dot"></span>
+                <span id="fullmap-waypoint-dist">Ping 0m</span>
+                <button type="button" id="btn-clear-waypoint" class="btn-clear-wp" title="Clear Waypoint">×</button>
+              </span>
+              <button type="button" id="btn-close-fullmap" class="btn-outlined btn-sm btn-close-map">Close [M]</button>
+            </div>
+          </div>
+
+          <div class="fullmap-canvas-wrap">
+            <canvas id="fullmap-canvas" width="900" height="570"></canvas>
+          </div>
+
+          <div class="fullmap-footer">
+            <div class="fullmap-controls-hint">
+              <span><b>Left-Click</b> Set Waypoint</span>
+              <span class="hint-dot">·</span>
+              <span><b>Right-Click</b> Clear</span>
+              <span class="hint-dot">·</span>
+              <span><b>M / Esc</b> Close</span>
+            </div>
+            <div class="fullmap-legend">
+              <span class="legend-item"><i class="lg-swatch lg-t1"></i>Tier 1</span>
+              <span class="legend-item"><i class="lg-swatch lg-t2"></i>Tier 2</span>
+              <span class="legend-item"><i class="lg-swatch lg-t3"></i>Tier 3</span>
+              <span class="legend-item"><i class="lg-swatch lg-drop"></i>Supply Drop</span>
+              <span class="legend-item"><i class="lg-swatch lg-wp"></i>Waypoint</span>
+              <span class="legend-item"><i class="lg-swatch lg-storm"></i>Storm</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STANDARD AAA VERTICAL PAUSE MODAL -->
+      <div id="pause-overlay" class="overlay hidden">
+        <div class="modal-card pause-card">
+          <div class="pause-match-pill" id="pause-match-pill">Battle Royale · Gmail AI</div>
+          <h2>Match Paused</h2>
+          <p>Select Resume to lock cursor and return to the Googleplex.</p>
+          <div class="pause-actions">
+            <button type="button" id="btn-resume" class="btn-primary">Resume Match</button>
+            <button type="button" id="btn-pause-settings" class="btn-tonal">Settings</button>
+            <button type="button" id="btn-pause-controls" class="btn-tonal">Controls</button>
+            <button type="button" id="btn-back-lobby" class="btn-outlined">Return to Home</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- GAME OVER / VICTORY ROYALE SUMMARY OVERLAY -->
+      <div id="gameover-overlay" class="overlay hidden">
+        <div class="modal-card gameover-card">
+          <div class="placement-badge is-victory" id="go-placement">#1 / 20</div>
+          <h2 id="go-title">Victory Royale!</h2>
+          <p id="go-subtitle">You outlasted every rival Product AI at the Googleplex.</p>
+          <div class="summary-stats summary-stats-7">
+            <div class="sum-stat sum-span-4">
+              <span class="sum-label">Play Mode</span>
+              <span class="sum-val" id="go-mode">Battle Royale</span>
+            </div>
+            <div class="sum-stat sum-span-4">
+              <span class="sum-label">Product AI</span>
+              <span class="sum-val" id="go-hero">Gmail AI</span>
+            </div>
+            <div class="sum-stat sum-span-4">
+              <span class="sum-label">Bot Difficulty</span>
+              <span class="sum-val" id="go-difficulty">Tactical (Staff)</span>
+            </div>
+            <div class="sum-stat sum-span-3">
+              <span class="sum-label">Eliminations</span>
+              <span class="sum-val" id="go-elims">0</span>
+            </div>
+            <div class="sum-stat sum-span-3">
+              <span class="sum-label">Headshots</span>
+              <span class="sum-val sum-gold" id="go-headshots">0</span>
+            </div>
+            <div class="sum-stat sum-span-3">
+              <span class="sum-label">Damage Dealt</span>
+              <span class="sum-val" id="go-damage">0</span>
+            </div>
+            <div class="sum-stat sum-span-3">
+              <span class="sum-label">Survival Time</span>
+              <span class="sum-val" id="go-time">0:00</span>
+            </div>
+          </div>
+          <div class="modal-actions modal-actions-3">
+            <button type="button" id="btn-play-again" class="btn-primary">Drop Again</button>
+            <button type="button" id="btn-change-hero" class="btn-tonal">Change AI</button>
+            <button type="button" id="btn-gameover-home" class="btn-outlined">Home</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

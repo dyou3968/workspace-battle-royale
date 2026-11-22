@@ -1,0 +1,20 @@
+{
+  "name": "workspace-battle-royale",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5173",
+    "build": "tsc && vite build",
+    "preview": "vite preview --port 4173",
+    "assets:build": "blender --background --python scripts/blender/build_characters.py && blender --background --python scripts/blender/build_weapons.py && blender --background --python scripts/blender/build_utilities.py && blender --background --python scripts/blender/build_map.py && blender --background --python scripts/blender/build_office_props.py && blender --background --python scripts/blender/build_expanded_landmarks.py && blender --background --python scripts/blender/build_park_defense.py && blender --background --python scripts/blender/build_full_map.py"
+  },
+  "dependencies": {
+    "three": "^0.172.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.172.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11"
+  }
+}
