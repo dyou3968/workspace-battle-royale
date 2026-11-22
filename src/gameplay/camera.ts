@@ -13,6 +13,7 @@ export interface CameraUpdateInput {
   yaw: number;
   pitch: number;
   crouching: boolean;
+  sliding?: boolean;
   sprinting: boolean;
   isAds: boolean;
   sniperScope: boolean;
@@ -35,6 +36,7 @@ export class ThirdPersonCamera {
   private currentBackDist = 3.8;
   private currentRightOffset = 0.72;
   private currentUpOffset = 0.24;
+  private currentRoll = 0;
   private smoothArmDist = 3.8;
   private smoothShoulderScale = 1.0;
 
@@ -78,6 +80,7 @@ export class ThirdPersonCamera {
     this.currentBackDist = 6.2;
     this.currentRightOffset = 0;
     this.currentUpOffset = 1.4;
+    this.currentRoll = 0;
     this.smoothArmDist = 6.2;
     this.smoothShoulderScale = 1.0;
     this.shakeIntensity = 0;
@@ -100,6 +103,7 @@ export class ThirdPersonCamera {
       yaw,
       pitch,
       crouching,
+      sliding = false,
       sprinting,
       isAds,
       sniperScope,
@@ -157,6 +161,11 @@ export class ThirdPersonCamera {
       targetBack = 1.82;
       targetRight = 0.58;
       targetUp = 0.16;
+    } else if (sliding) {
+      targetFov = 76;
+      targetBack = 4.05;
+      targetRight = 0.74;
+      targetUp = 0.16;
     } else if (sprinting) {
       targetFov = 73;
       targetBack = 4.15;
@@ -164,9 +173,12 @@ export class ThirdPersonCamera {
       targetUp = 0.26;
     }
 
-    const targetEye = crouching
-      ? GAME_CONSTANTS.EYE_HEIGHT_CROUCHING
-      : GAME_CONSTANTS.EYE_HEIGHT_STANDING;
+    const targetEye =
+      sliding && !isAds && !sniperScope
+        ? GAME_CONSTANTS.EYE_HEIGHT_SLIDING
+        : crouching
+          ? GAME_CONSTANTS.EYE_HEIGHT_CROUCHING
+          : GAME_CONSTANTS.EYE_HEIGHT_STANDING;
 
     // Fast, responsive zoom-in lerp (14/s for ground ADS, 18/s for Sniper Scope)
     const blendRate = sniperScope ? 18 : isAds ? 14 : 11;
@@ -176,6 +188,9 @@ export class ThirdPersonCamera {
     this.currentBackDist += (targetBack - this.currentBackDist) * blend;
     this.currentRightOffset += (targetRight - this.currentRightOffset) * blend;
     this.currentUpOffset += (targetUp - this.currentUpOffset) * blend;
+
+    const targetRoll = sliding && !isAds && !sniperScope && !skyDropping ? -0.026 : 0;
+    this.currentRoll += (targetRoll - this.currentRoll) * Math.min(1, dt * 11);
 
     if (Math.abs(this.camera.fov - this.currentFov) > 0.01) {
       this.camera.fov = this.currentFov;
@@ -305,6 +320,11 @@ export class ThirdPersonCamera {
     // Look down exact center-screen sightline from camera position
     this.lookTarget.copy(this.camera.position).addScaledVector(this.forward, 120);
     this.camera.lookAt(this.lookTarget);
+
+    // Subtle kinetic Dutch roll during tactical slide (around camera local Z, preserves aim ray!)
+    if (Math.abs(this.currentRoll) > 0.0002) {
+      this.camera.rotateZ(this.currentRoll);
+    }
   }
 
   /**

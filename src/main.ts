@@ -1320,7 +1320,9 @@ function escapeHtml(text: string): string {
 
 function renderStatusBadges(state: HudSnapshot): void {
   const badges: { cls: string; text: string }[] = [];
-  if (state.status.crouching) {
+  if (state.status.sliding) {
+    badges.push({ cls: 'slide', text: 'SLIDING • -45% SPREAD' });
+  } else if (state.status.crouching) {
     let crouchLabel = 'CROUCH • -45% SPREAD';
     if (state.channel.active && state.channel.kind === 'consumable') {
       const lower = state.channel.label.toLowerCase();

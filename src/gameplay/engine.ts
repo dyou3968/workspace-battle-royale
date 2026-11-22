@@ -150,6 +150,16 @@ interface Combatant {
   skyDropping: boolean;
   grounded: boolean;
   crouching: boolean;
+  sliding: boolean;
+  slideTimer: number;
+  slideElapsed: number;
+  slideCooldown: number;
+  slideDirX: number;
+  slideDirZ: number;
+  slideSpeed: number;
+  slidePoseBlend: number;
+  slideVfxTimer: number;
+  slideInitiatedByCtrl: boolean;
   sprinting: boolean;
   isAds: boolean;
   surface: 'grass' | 'stone' | 'sand' | 'metal';
@@ -207,6 +217,17 @@ interface Combatant {
   glidePitch: number;
   smoothAimPitch: number;
   twoHandBlend: number;
+
+  // Cached exact inverse-delta quaternions to undo post-mixer procedural bone offsets cleanly before each mixer.update()
+  hasProcBoneUndo: boolean;
+  procBoneUndo: {
+    spine: THREE.Quaternion;
+    chest: THREE.Quaternion;
+    thighL: THREE.Quaternion;
+    shinL: THREE.Quaternion;
+    thighR: THREE.Quaternion;
+    shinR: THREE.Quaternion;
+  };
 
   // Performance: 10 Hz staggered Bot AI & Animation LOD state
   aiThinkTimer: number;
@@ -453,6 +474,8 @@ export class WorkspaceRoyaleEngine {
   private crouchToggled = false;
   private sprintLatchedOnReload = false;
   private sprintLatchedOnChannel = false;
+  private sprintLatchedOnSlide = false;
+  private ctrlSlideConsumed = false;
   private pointerLocked = false;
 
   // Graphics Quality, Telemetry, Full Tactical Map & Waypoint State
@@ -472,6 +495,14 @@ export class WorkspaceRoyaleEngine {
   private readonly tmpQuatA = new THREE.Quaternion();
   private readonly tmpQuatB = new THREE.Quaternion();
   private readonly tmpQuatC = new THREE.Quaternion();
+  private readonly tmpPreBoneQuats = {
+    spine: new THREE.Quaternion(),
+    chest: new THREE.Quaternion(),
+    thighL: new THREE.Quaternion(),
+    shinL: new THREE.Quaternion(),
+    thighR: new THREE.Quaternion(),
+    shinR: new THREE.Quaternion(),
+  };
   private readonly tmpProj = new THREE.Vector3();
 
   // Bound event listeners for clean disposal
@@ -688,6 +719,8 @@ export class WorkspaceRoyaleEngine {
       this.keys.clear();
       this.sprintLatchedOnReload = false;
       this.sprintLatchedOnChannel = false;
+      this.sprintLatchedOnSlide = false;
+      this.ctrlSlideConsumed = false;
       if (document.pointerLockElement === this.renderer.domElement) {
         document.exitPointerLock();
       }
@@ -744,6 +777,8 @@ export class WorkspaceRoyaleEngine {
     this.mouseRightDown = false;
     this.sprintLatchedOnReload = false;
     this.sprintLatchedOnChannel = false;
+    this.sprintLatchedOnSlide = false;
+    this.ctrlSlideConsumed = false;
     this.keys.clear();
     this.audio.setGliderWind(false);
     if (document.pointerLockElement === this.renderer.domElement) {
@@ -776,6 +811,8 @@ export class WorkspaceRoyaleEngine {
     this.crouchToggled = false;
     this.sprintLatchedOnReload = false;
     this.sprintLatchedOnChannel = false;
+    this.sprintLatchedOnSlide = false;
+    this.ctrlSlideConsumed = false;
     this.mapOpen = false;
     this.waypoint = null;
     this.visibleChestCount = 0;
@@ -966,6 +1003,16 @@ export class WorkspaceRoyaleEngine {
       skyDropping: true,
       grounded: false,
       crouching: false,
+      sliding: false,
+      slideTimer: 0,
+      slideElapsed: 0,
+      slideCooldown: 0,
+      slideDirX: 0,
+      slideDirZ: -1,
+      slideSpeed: 0,
+      slidePoseBlend: 0,
+      slideVfxTimer: 0,
+      slideInitiatedByCtrl: false,
       sprinting: false,
       isAds: false,
       surface: 'stone',
@@ -1030,6 +1077,15 @@ export class WorkspaceRoyaleEngine {
       glidePitch: -0.08,
       smoothAimPitch: 0,
       twoHandBlend: 1,
+      hasProcBoneUndo: false,
+      procBoneUndo: {
+        spine: new THREE.Quaternion(),
+        chest: new THREE.Quaternion(),
+        thighL: new THREE.Quaternion(),
+        shinL: new THREE.Quaternion(),
+        thighR: new THREE.Quaternion(),
+        shinR: new THREE.Quaternion(),
+      },
       // Evenly stagger 10 Hz bot thinking across [0.00, 0.10)s so ~2-3 bots think per 60fps frame
       aiThinkTimer: opts.isPlayer ? 0 : ((opts.botIndex ?? 0) / totalBots) * 0.1,
       aiThinkAccumDt: 0.016,
@@ -1659,6 +1715,7 @@ export class WorkspaceRoyaleEngine {
       // Cooldowns & status timers
       c.fireCooldown = Math.max(0, c.fireCooldown - dt);
       c.ultCooldown = Math.max(0, c.ultCooldown - dt);
+      c.slideCooldown = Math.max(0, c.slideCooldown - dt);
       c.silencedSec = Math.max(0, c.silencedSec - dt);
       c.hastedSec = Math.max(0, c.hastedSec - dt);
       c.slowedSec = Math.max(0, c.slowedSec - dt);
@@ -1804,6 +1861,91 @@ export class WorkspaceRoyaleEngine {
     }
   }
 
+  private getCombatantSpeedMult(c: Combatant): number {
+    const mode = GAME_MODES[this.activeGameMode] ?? GAME_MODES.battle_royale;
+    let chronoSpeedMult = 1.0;
+    for (const cz of this.chronoZones) {
+      const d = Math.hypot(c.pos.x - cz.center.x, c.pos.z - cz.center.z);
+      if (d <= cz.radius) {
+        if (c.id === cz.ownerId) {
+          chronoSpeedMult = Math.max(chronoSpeedMult, 1.4);
+        } else {
+          chronoSpeedMult = Math.min(chronoSpeedMult, 0.35);
+        }
+      }
+    }
+    return mode.moveSpeedMult * chronoSpeedMult;
+  }
+
+  private tryStartSlide(p: Combatant, initiatedByCtrl: boolean): boolean {
+    if (
+      !p.alive ||
+      !p.grounded ||
+      p.skyDropping ||
+      p.rewind.active ||
+      p.channel ||
+      p.sliding ||
+      p.slideCooldown > 0
+    ) {
+      return false;
+    }
+
+    const horizSpeed = Math.hypot(p.vel.x, p.vel.z);
+    if (horizSpeed < GAME_CONSTANTS.SLIDE_MIN_ENTRY_SPEED) {
+      return false;
+    }
+
+    p.slideDirX = p.vel.x / horizSpeed;
+    p.slideDirZ = p.vel.z / horizSpeed;
+
+    const speedMult = this.getCombatantSpeedMult(p);
+    const launchBase =
+      horizSpeed >= 10.2 ? GAME_CONSTANTS.SLIDE_SPRINT_SPEED : GAME_CONSTANTS.SLIDE_RUN_SPEED;
+    p.slideSpeed = launchBase * speedMult;
+
+    p.sliding = true;
+    p.crouching = true;
+    p.sprinting = false;
+    p.slideTimer = GAME_CONSTANTS.SLIDE_DURATION;
+    p.slideElapsed = 0;
+    p.slideInitiatedByCtrl = initiatedByCtrl;
+    p.slideVfxTimer = 0.045;
+    p.vel.x = p.slideDirX * p.slideSpeed;
+    p.vel.z = p.slideDirZ * p.slideSpeed;
+
+    if (p.isPlayer) {
+      if (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) {
+        this.sprintLatchedOnSlide = true;
+      }
+      this.audio.playSlideStart(p.surface);
+    }
+
+    this.vfx.spawnSlideDust(p.pos, p.slideDirX, p.slideDirZ, p.surface, true);
+    return true;
+  }
+
+  private endSlide(c: Combatant, keepCrouchIfCtrl: boolean): void {
+    if (!c.sliding) return;
+    c.sliding = false;
+    c.slideTimer = 0;
+    c.slideElapsed = 0;
+    c.slideInitiatedByCtrl = false;
+    c.slideCooldown = GAME_CONSTANTS.SLIDE_COOLDOWN;
+
+    if (c.isPlayer) {
+      this.sprintLatchedOnSlide = false;
+      const ctrlHeld = this.keys.has('ControlLeft');
+      if (keepCrouchIfCtrl && ctrlHeld) {
+        c.crouching = true;
+      } else {
+        this.crouchToggled = false;
+        if (!this.isHealOrShieldChannel(c.channel)) {
+          c.crouching = false;
+        }
+      }
+    }
+  }
+
   private updatePlayerController(
     p: Combatant,
     dt: number,
@@ -1879,12 +2021,33 @@ export class WorkspaceRoyaleEngine {
         ? WEAPONS[activeSlotObj.id as WeaponId]
         : null;
 
-    // ADS: Right-Click while wielding weapon and not reloading/channeling
+    // ADS: Right-Click while wielding weapon and not reloading/channeling (allowed during slide!)
     p.isAds = this.mouseRightDown && activeWeapon !== null && !p.isReloading && !p.channel;
 
-    // Sprint cancels crouch, active channel & reload (unless Shift was already held when reload or channel began)
+    // Edge-trigger ControlLeft slide cleanly (e.g. pressed just before landing or while moving fast)
+    if (!ctrlHeld) {
+      this.ctrlSlideConsumed = false;
+    } else if (
+      !this.ctrlSlideConsumed &&
+      p.grounded &&
+      !p.sliding &&
+      !p.rewind.active &&
+      !this.isHealOrShieldChannel(p.channel)
+    ) {
+      this.ctrlSlideConsumed = true;
+      this.tryStartSlide(p, true);
+    }
+
+    // Sprint cancels crouch, active channel & reload (unless Shift was already held when reload/channel/slide began, or holding Ctrl)
     const canTriggerSprint =
-      shiftHeld && fInput > 0 && !p.isAds && !this.sprintLatchedOnReload && !this.sprintLatchedOnChannel;
+      shiftHeld &&
+      fInput > 0 &&
+      !p.isAds &&
+      !p.sliding &&
+      !ctrlHeld &&
+      !this.sprintLatchedOnReload &&
+      !this.sprintLatchedOnChannel &&
+      !this.sprintLatchedOnSlide;
     if (canTriggerSprint) {
       this.crouchToggled = false;
       if (p.channel) this.cancelChannel(p);
@@ -1896,54 +2059,107 @@ export class WorkspaceRoyaleEngine {
     if (!p.channel && !shiftHeld) {
       this.sprintLatchedOnChannel = false;
     }
-
-    const healCrouching = this.isHealOrShieldChannel(p.channel);
-    p.crouching = healCrouching || (!canTriggerSprint && (this.crouchToggled || ctrlHeld));
-    p.sprinting = canTriggerSprint && !p.crouching && !p.isReloading && !p.channel;
-
-    // Movement speed
-    let baseSpeed: number = GAME_CONSTANTS.WALK_SPEED;
-    if (p.channel) {
-      baseSpeed = 3.2;
-    } else if (p.crouching) {
-      baseSpeed = GAME_CONSTANTS.CROUCH_SPEED;
-    } else if (p.isReloading) {
-      baseSpeed = 5.2;
-    } else if (p.isAds) {
-      baseSpeed = 5.4;
-    } else if (p.sprinting) {
-      baseSpeed = GAME_CONSTANTS.SPRINT_SPEED;
-    }
-    const moveSpeed = baseSpeed * speedMult;
-
-    const sinY = Math.sin(p.yaw);
-    const cosY = Math.cos(p.yaw);
-    let moveX = -sinY * fInput + cosY * rInput;
-    let moveZ = -cosY * fInput - sinY * rInput;
-    const len = Math.hypot(moveX, moveZ);
-    if (len > 0.01) {
-      moveX /= len;
-      moveZ /= len;
+    if (!p.sliding && !shiftHeld) {
+      this.sprintLatchedOnSlide = false;
     }
 
-    const accel = p.grounded ? 16 : 5.5;
-    p.vel.x += (moveX * moveSpeed - p.vel.x) * Math.min(1, dt * accel);
-    p.vel.z += (moveZ * moveSpeed - p.vel.z) * Math.min(1, dt * accel);
+    // Tactical Slide movement & steering vs. standard locomotion
+    let didSlideJump = false;
+    if (p.sliding) {
+      p.slideElapsed += dt;
+      p.slideTimer -= dt;
+      p.crouching = true;
+      p.sprinting = false;
 
-    // Jump
-    if (this.keys.has('Space') && p.grounded) {
-      if (p.channel) this.cancelChannel(p);
-      this.crouchToggled = false;
-      p.crouching = false;
-      p.vel.y = GAME_CONSTANTS.JUMP_IMPULSE;
-      p.grounded = false;
-      p.airborneTime = 0.09;
-      p.peakFallSpeed = 0;
-      p.takeoffTimer = 0.14;
-      p.squashTimer = 0;
+      // Hold-Ctrl release exits slide smoothly once past initial commit window
+      if (p.slideInitiatedByCtrl && !ctrlHeld && p.slideElapsed >= 0.18) {
+        this.endSlide(p, false);
+      } else if (this.keys.has('Space') && p.grounded) {
+        // Slide-Jump: cancel slide, boost jump slightly, and preserve ~85% horizontal slide velocity
+        const preserveVx = p.vel.x * 0.85;
+        const preserveVz = p.vel.z * 0.85;
+        this.endSlide(p, false);
+        if (p.channel) this.cancelChannel(p);
+        this.crouchToggled = false;
+        p.crouching = false;
+        p.vel.x = preserveVx;
+        p.vel.z = preserveVz;
+        p.vel.y = GAME_CONSTANTS.JUMP_IMPULSE * 1.04;
+        p.grounded = false;
+        p.airborneTime = 0.09;
+        p.peakFallSpeed = 0;
+        p.takeoffTimer = 0.14;
+        p.squashTimer = 0;
+        didSlideJump = true;
+      } else {
+        // Subtle lateral carving around corners/cover via A/D (~1.35 rad/s)
+        if (rInput !== 0) {
+          const steerAngle = rInput * 1.35 * dt;
+          const cs = Math.cos(steerAngle);
+          const sn = Math.sin(steerAngle);
+          const nx = p.slideDirX * cs - p.slideDirZ * sn;
+          const nz = p.slideDirX * sn + p.slideDirZ * cs;
+          const nLen = Math.hypot(nx, nz) || 1;
+          p.slideDirX = nx / nLen;
+          p.slideDirZ = nz / nLen;
+        }
+        p.vel.x = p.slideDirX * p.slideSpeed;
+        p.vel.z = p.slideDirZ * p.slideSpeed;
+      }
+    }
+
+    if (!p.sliding && !didSlideJump) {
+      const healCrouching = this.isHealOrShieldChannel(p.channel);
+      p.crouching = healCrouching || (!canTriggerSprint && (this.crouchToggled || ctrlHeld));
+      p.sprinting = canTriggerSprint && !p.crouching && !p.isReloading && !p.channel;
+
+      // Movement speed
+      let baseSpeed: number = GAME_CONSTANTS.WALK_SPEED;
+      if (p.channel) {
+        baseSpeed = 3.2;
+      } else if (p.crouching) {
+        baseSpeed = GAME_CONSTANTS.CROUCH_SPEED;
+      } else if (p.isReloading) {
+        baseSpeed = 5.2;
+      } else if (p.isAds) {
+        baseSpeed = 5.4;
+      } else if (p.sprinting) {
+        baseSpeed = GAME_CONSTANTS.SPRINT_SPEED;
+      }
+      const moveSpeed = baseSpeed * speedMult;
+
+      const sinY = Math.sin(p.yaw);
+      const cosY = Math.cos(p.yaw);
+      let moveX = -sinY * fInput + cosY * rInput;
+      let moveZ = -cosY * fInput - sinY * rInput;
+      const len = Math.hypot(moveX, moveZ);
+      if (len > 0.01) {
+        moveX /= len;
+        moveZ /= len;
+      }
+
+      const accel = p.grounded ? 16 : 5.5;
+      p.vel.x += (moveX * moveSpeed - p.vel.x) * Math.min(1, dt * accel);
+      p.vel.z += (moveZ * moveSpeed - p.vel.z) * Math.min(1, dt * accel);
+
+      // Jump
+      if (this.keys.has('Space') && p.grounded) {
+        if (p.channel) this.cancelChannel(p);
+        this.crouchToggled = false;
+        p.crouching = false;
+        p.vel.y = GAME_CONSTANTS.JUMP_IMPULSE;
+        p.grounded = false;
+        p.airborneTime = 0.09;
+        p.peakFallSpeed = 0;
+        p.takeoffTimer = 0.14;
+        p.squashTimer = 0;
+      }
     }
 
     const wasGrounded = p.grounded;
+    const prevX = p.pos.x;
+    const prevY = p.pos.y;
+    const prevZ = p.pos.z;
     const prevVelY = p.vel.y;
     const colHeight = p.crouching ? GAME_CONSTANTS.CROUCH_HEIGHT : GAME_CONSTANTS.STANDING_HEIGHT;
     const moveRes = this.physics.resolveCombatantMovement(p.pos, p.vel, 0.42, colHeight, dt);
@@ -1972,9 +2188,60 @@ export class WorkspaceRoyaleEngine {
       p.peakFallSpeed = 0;
     }
 
-    // Footstep audio
+    // Post-movement slide slope physics, dust trail, wall-impact & ledge termination
+    if (p.sliding) {
+      const dispHoriz = Math.hypot(p.pos.x - prevX, p.pos.z - prevZ);
+      const actualHorizSpeed = dispHoriz / Math.max(dt, 0.001);
+      const deltaY = p.pos.y - prevY;
+      const slopeGrad = dispHoriz > 0.01 ? deltaY / dispHoriz : 0;
+
+      if (p.grounded) {
+        if (slopeGrad < -0.06) {
+          // Downhill ramp/hill: boost momentum & extend duration up to SLIDE_MAX_DURATION
+          const downhillBoost = Math.min(9.5, (-slopeGrad - 0.06) * 26.0);
+          const maxDownhillSpeed = GAME_CONSTANTS.SLIDE_SPRINT_SPEED * 1.18 * speedMult;
+          p.slideSpeed = Math.min(maxDownhillSpeed, p.slideSpeed + downhillBoost * dt);
+          const maxRemaining = Math.max(0, GAME_CONSTANTS.SLIDE_MAX_DURATION - p.slideElapsed);
+          p.slideTimer = Math.min(maxRemaining, p.slideTimer + dt * 1.35);
+        } else if (slopeGrad > 0.08) {
+          // Uphill slope: stronger friction
+          p.slideSpeed = Math.max(0, p.slideSpeed - 18.0 * dt);
+        } else {
+          // Flat ground friction
+          p.slideSpeed = Math.max(0, p.slideSpeed - 11.8 * dt);
+        }
+        p.vel.x = p.slideDirX * p.slideSpeed;
+        p.vel.z = p.slideDirZ * p.slideSpeed;
+
+        p.slideVfxTimer -= dt;
+        if (p.slideVfxTimer <= 0) {
+          p.slideVfxTimer = 0.045;
+          this.vfx.spawnSlideDust(p.pos, p.slideDirX, p.slideDirZ, p.surface);
+        }
+      }
+
+      const hitWall = p.slideElapsed > 0.12 && actualHorizSpeed < 3.8;
+      const leftLedge = !p.grounded && p.airborneTime > 0.14;
+      if (
+        hitWall ||
+        leftLedge ||
+        p.slideSpeed < GAME_CONSTANTS.SLIDE_MIN_END_SPEED ||
+        p.slideTimer <= 0
+      ) {
+        if (hitWall) {
+          p.vel.x *= 0.25;
+          p.vel.z *= 0.25;
+        } else if (leftLedge) {
+          p.vel.x = p.slideDirX * p.slideSpeed;
+          p.vel.z = p.slideDirZ * p.slideSpeed;
+        }
+        this.endSlide(p, !leftLedge);
+      }
+    }
+
+    // Footstep audio (suppressed while sliding)
     const horizSpeed = Math.hypot(p.vel.x, p.vel.z);
-    if (p.grounded && horizSpeed > 1.2) {
+    if (p.grounded && !p.sliding && horizSpeed > 1.2) {
       p.footstepTimer -= dt;
       if (p.footstepTimer <= 0) {
         p.footstepTimer = p.sprinting ? 0.29 : p.crouching ? 0.54 : 0.4;
@@ -2249,6 +2516,12 @@ export class WorkspaceRoyaleEngine {
   private completeSkyDropTouchdown(c: Combatant, groundY: number): void {
     c.skyDropping = false;
     c.sprinting = false;
+    c.sliding = false;
+    c.slideTimer = 0;
+    c.slideElapsed = 0;
+    c.slideCooldown = 0;
+    c.slidePoseBlend = 0;
+    c.slideInitiatedByCtrl = false;
     c.pos.y = groundY;
     c.vel.set(0, 0, 0);
     c.grounded = true;
@@ -2877,10 +3150,15 @@ export class WorkspaceRoyaleEngine {
   ): void {
     if (!victim.alive) return;
     const aliveBefore = this.combatants.filter((c) => c.alive).length;
+    if (victim.sliding) {
+      this.endSlide(victim, false);
+    }
     victim.alive = false;
     victim.channel = null;
     if (victim.isPlayer) {
       this.sprintLatchedOnChannel = false;
+      this.sprintLatchedOnSlide = false;
+      this.ctrlSlideConsumed = false;
     }
     victim.sprinting = false;
     this.cancelReload(victim);
@@ -2963,6 +3241,8 @@ export class WorkspaceRoyaleEngine {
     this.mouseRightDown = false;
     this.sprintLatchedOnReload = false;
     this.sprintLatchedOnChannel = false;
+    this.sprintLatchedOnSlide = false;
+    this.ctrlSlideConsumed = false;
     this.keys.clear();
     this.audio.setGliderWind(false);
     if (document.pointerLockElement === this.renderer.domElement) {
@@ -3326,6 +3606,9 @@ export class WorkspaceRoyaleEngine {
     }
 
     // Cleanse slows & auto-reload active weapon immediately
+    if (caster.sliding) {
+      this.endSlide(caster, false);
+    }
     caster.slowedSec = 0;
     this.cancelReload(caster);
     caster.sprinting = false;
@@ -3488,6 +3771,9 @@ export class WorkspaceRoyaleEngine {
     }
 
     // Start timed consumable channel (1.4s - 3.0s)
+    if (c.sliding) {
+      this.endSlide(c, false);
+    }
     this.cancelReload(c);
     c.sprinting = false;
     c.isAds = false;
@@ -3661,6 +3947,9 @@ export class WorkspaceRoyaleEngine {
   }
 
   private activateImpulseBooster(c: Combatant, rarity: Rarity): void {
+    if (c.sliding) {
+      this.endSlide(c, false);
+    }
     const power = getUtilityAmount('impulse_booster', rarity); // 22 / 26 / 30
     const fx = -Math.sin(c.yaw);
     const fz = -Math.cos(c.yaw);
@@ -3684,6 +3973,9 @@ export class WorkspaceRoyaleEngine {
         this.callbacks.onAnnouncement('ACCESS REVOKED', 'Chest opening blocked while silenced!');
       }
       return false;
+    }
+    if (c.sliding) {
+      this.endSlide(c, false);
     }
     this.cancelReload(c);
     c.sprinting = false;
@@ -3736,6 +4028,9 @@ export class WorkspaceRoyaleEngine {
         if (p.silencedSec > 0) {
           this.audio.playSilenced();
           return;
+        }
+        if (p.sliding) {
+          this.endSlide(p, false);
         }
         this.cancelReload(p);
         p.sprinting = false;
@@ -4079,6 +4374,62 @@ export class WorkspaceRoyaleEngine {
   }
 
   /**
+   * Reverses the exact procedural bone offsets applied on the previous frame right BEFORE
+   * `mixer.update(animDt)` so Three.js `PropertyMixer.apply()` (which skips `setValue` whenever
+   * interleaved clip buffers match at low `timeScale`!) NEVER accumulates procedural rotations.
+   */
+  private undoProceduralBoneOffsets(c: Combatant): void {
+    if (!c.hasProcBoneUndo) return;
+    const { spineNode, chestNode, thighLNode, shinLNode, thighRNode, shinRNode } = c.hero;
+    const u = c.procBoneUndo;
+    if (spineNode) spineNode.quaternion.premultiply(u.spine).normalize();
+    if (chestNode) chestNode.quaternion.premultiply(u.chest).normalize();
+    if (thighLNode) thighLNode.quaternion.premultiply(u.thighL).normalize();
+    if (shinLNode) shinLNode.quaternion.premultiply(u.shinL).normalize();
+    if (thighRNode) thighRNode.quaternion.premultiply(u.thighR).normalize();
+    if (shinRNode) shinRNode.quaternion.premultiply(u.shinR).normalize();
+    c.hasProcBoneUndo = false;
+  }
+
+  /**
+   * Applies procedural athletic tactical slide bone offsets (after `mixer.update` and before
+   * `alignWeaponTwoHanded`) around the hero's right (+X) axis:
+   * - Counter-pitches `Spine` & `Chest` upright so torso, head, and two-handed weapon stay aimed level on target
+   * - Extends lead leg (`Thigh_L` / `Shin_L`) forward, heel skimming the ground
+   * - Tucks trail leg (`Thigh_R` / `Shin_R`) cleanly beneath the hip above ground level
+   */
+  private applySlideBonePose(c: Combatant, blend: number): void {
+    const { spineNode, chestNode, thighLNode, shinLNode, thighRNode, shinRNode, model, root } = c.hero;
+    if (blend <= 0.001) return;
+
+    root.updateMatrixWorld(true);
+    model.getWorldQuaternion(this.tmpQuatC);
+    // Hero right (+X) axis in world space (positive rotation leans +Y -> +Z back, swings -Y -> -Z forward)
+    this.tmpVecA.set(1, 0, 0).applyQuaternion(this.tmpQuatC).normalize();
+
+    const applyAxisRot = (node: THREE.Object3D | null, angleRad: number): void => {
+      if (!node || !node.parent || Math.abs(angleRad) < 0.0005) return;
+      node.parent.getWorldQuaternion(this.tmpQuatA).invert();
+      this.tmpVecB.copy(this.tmpVecA).applyQuaternion(this.tmpQuatA).normalize();
+      this.tmpQuatB.setFromAxisAngle(this.tmpVecB, angleRad);
+      node.quaternion.premultiply(this.tmpQuatB);
+      node.updateMatrixWorld(true);
+    };
+
+    // Counter-pitch upper body upright (negative rotates +Y forward toward -Z) so head & rifle aim dead-level forward
+    applyAxisRot(spineNode, -0.20 * blend);
+    applyAxisRot(chestNode, -0.30 * blend);
+
+    // Lead leg (Left): extend forward heel-first, skimming cleanly on top of the floor
+    applyAxisRot(thighLNode, -0.16 * blend);
+    applyAxisRot(shinLNode, 1.05 * blend);
+
+    // Trail leg (Right): tuck thigh & shin compactly beneath hip with knee & boot cleanly above floor
+    applyAxisRot(thighRNode, -0.44 * blend);
+    applyAxisRot(shinRNode, -0.46 * blend);
+  }
+
+  /**
    * Pins `c.hero.gliderMount` directly to the live midpoint of `leftHandNode` & `rightHandNode`
    * in `c.hero.model` local space (after `mixer.update` + `updateMatrixWorld`) + calibrated
    * wrist-to-palm offset `(0.000, +0.076, -0.056)` so hands stay strictly locked onto the twin
@@ -4222,8 +4573,9 @@ export class WorkspaceRoyaleEngine {
     // 2. Dynamic speed-matched stride (timeScale) across both unarmed & armed locomotion clips
     const runScale = THREE.MathUtils.clamp(horizSpeed / GAME_CONSTANTS.WALK_SPEED, 0.55, 1.45);
     const sprintScale = THREE.MathUtils.clamp(horizSpeed / GAME_CONSTANTS.SPRINT_SPEED, 0.55, 1.45);
-    const crouchScale =
-      horizSpeed < 0.25
+    const crouchScale = c.sliding
+      ? 0.08
+      : horizSpeed < 0.25
         ? 0.25
         : THREE.MathUtils.clamp(horizSpeed / GAME_CONSTANTS.CROUCH_SPEED, 0.55, 1.45);
     c.hero.actions.Run.timeScale = runScale;
@@ -4265,8 +4617,15 @@ export class WorkspaceRoyaleEngine {
       c.hero.crossFade(nextAnim, fadeDur);
     }
 
-    // 4. Dynamic strafe/turn body lean + landing impulse squash & takeoff bounce on hero.model
+    // 4. Dynamic strafe/turn body lean, tactical slide posture & landing/takeoff squash on hero.model
+    const targetSlideBlend = c.sliding && !c.skyDropping ? 1 : 0;
+    c.slidePoseBlend += (targetSlideBlend - c.slidePoseBlend) * Math.min(1, animDt * 14);
+    if (!c.sliding && c.slidePoseBlend < 0.004) {
+      c.slidePoseBlend = 0;
+    }
+
     if (c.skyDropping) {
+      c.slidePoseBlend = 0;
       c.hero.model.scale.set(1, 1, 1);
       c.hero.model.position.set(0, 0, 0);
       c.hero.model.rotation.x = c.glidePitch;
@@ -4299,7 +4658,7 @@ export class WorkspaceRoyaleEngine {
 
       let targetLeanPitch = 0;
       let targetLeanBank = 0;
-      if (!lockAimPosture) {
+      if (!lockAimPosture && !c.sliding) {
         targetLeanPitch = THREE.MathUtils.clamp(
           -(localFwd / GAME_CONSTANTS.SPRINT_SPEED) * 0.068 - localFwdAcc * 0.0022,
           -0.11,
@@ -4326,8 +4685,13 @@ export class WorkspaceRoyaleEngine {
       const leanAlpha = Math.min(1, animDt * leanRate);
       c.leanPitch += (targetLeanPitch - c.leanPitch) * leanAlpha;
       c.leanBank += (targetLeanBank - c.leanBank) * leanAlpha;
-      c.hero.model.rotation.x = c.leanPitch;
-      c.hero.model.rotation.z = c.leanBank;
+
+      const b = c.slidePoseBlend;
+      // Positive rotation.x leans hero BACK (feet-first forward toward -Z) in Three.js model space
+      const slideBackLean = 0.46 * b;
+      const slideHipBank = -0.14 * b * (c.isAds ? 0.15 : 1.0);
+      c.hero.model.rotation.x = THREE.MathUtils.lerp(c.leanPitch, slideBackLean, b);
+      c.hero.model.rotation.z = THREE.MathUtils.lerp(c.leanBank, slideHipBank, b);
 
       // Landing impulse squash (0.18s damped spring) & responsive takeoff bounce (0.14s)
       let scaleY = 1.0;
@@ -4346,18 +4710,53 @@ export class WorkspaceRoyaleEngine {
         scaleXZ = 1 - stretch * 0.025;
       }
       c.hero.model.scale.set(scaleXZ, scaleY, scaleXZ);
-      c.hero.model.position.set(0, 0, 0);
+      c.hero.model.position.set(0, -0.13 * b, 0);
     }
 
-    // 5. Advance Blender skeletal animation mixer (using accumulated dt for mid-distance LOD bots)
+    // 5. Restore clean clip quaternions before advancing Blender skeletal animation mixer
+    this.undoProceduralBoneOffsets(c);
     c.hero.mixer.update(animDt);
 
-    // 5b. Upper-body vertical aim pitch tracking across Spine (35%) + Chest (65%) when aiming or crouching armed
+    // 5a/5b. Apply procedural athletic slide pose & upper-body vertical aim pitch, recording exact undo deltas
+    const hasSlideBonePose = c.slidePoseBlend > 0.001 && !c.skyDropping;
     const trackAimPitch = hasWeapon && (aimingNow || c.crouching) && !c.skyDropping && !c.isReloading;
     const targetAimPitch = trackAimPitch ? THREE.MathUtils.clamp(c.pitch, -0.65, 0.65) : 0;
     c.smoothAimPitch += (targetAimPitch - c.smoothAimPitch) * Math.min(1, animDt * 14);
-    if (Math.abs(c.smoothAimPitch) > 0.001) {
-      this.applyUpperBodyAimPitch(c, c.smoothAimPitch);
+    const hasAimPitchPose = Math.abs(c.smoothAimPitch) > 0.001;
+
+    if (hasSlideBonePose || hasAimPitchPose) {
+      const { spineNode, chestNode, thighLNode, shinLNode, thighRNode, shinRNode } = c.hero;
+      const pre = this.tmpPreBoneQuats;
+      if (spineNode) pre.spine.copy(spineNode.quaternion);
+      if (chestNode) pre.chest.copy(chestNode.quaternion);
+      if (thighLNode) pre.thighL.copy(thighLNode.quaternion);
+      if (shinLNode) pre.shinL.copy(shinLNode.quaternion);
+      if (thighRNode) pre.thighR.copy(thighRNode.quaternion);
+      if (shinRNode) pre.shinR.copy(shinRNode.quaternion);
+
+      if (hasSlideBonePose) {
+        this.applySlideBonePose(c, c.slidePoseBlend);
+      }
+      if (hasAimPitchPose) {
+        this.applyUpperBodyAimPitch(c, c.smoothAimPitch);
+      }
+
+      // Compute exact undo delta R = Q_pre * inv(Q_post) so R * Q_post === Q_pre before next mixer.update()
+      const u = c.procBoneUndo;
+      const storeUndo = (node: THREE.Object3D | null, preQ: THREE.Quaternion, outUndo: THREE.Quaternion): void => {
+        if (!node) {
+          outUndo.identity();
+          return;
+        }
+        outUndo.copy(node.quaternion).invert().premultiply(preQ).normalize();
+      };
+      storeUndo(spineNode, pre.spine, u.spine);
+      storeUndo(chestNode, pre.chest, u.chest);
+      storeUndo(thighLNode, pre.thighL, u.thighL);
+      storeUndo(shinLNode, pre.shinL, u.shinL);
+      storeUndo(thighRNode, pre.thighR, u.thighR);
+      storeUndo(shinRNode, pre.shinR, u.shinR);
+      c.hasProcBoneUndo = true;
     }
 
     // 6. Lock gliderMount directly to live Hand_L / Hand_R midpoint during Sky-Drop
@@ -4521,6 +4920,7 @@ export class WorkspaceRoyaleEngine {
       yaw: this.player.yaw,
       pitch: this.player.pitch,
       crouching: this.player.crouching,
+      sliding: this.player.sliding,
       sprinting: this.player.sprinting,
       isAds: this.player.isAds,
       sniperScope: this.isPlayerSniperScoped(),
@@ -4721,6 +5121,7 @@ export class WorkspaceRoyaleEngine {
       channel: channelState,
       status: {
         crouching: p?.crouching ?? false,
+        sliding: p?.sliding ?? false,
         silencedSec: p?.silencedSec ?? 0,
         hastedSec: p?.hastedSec ?? 0,
         slowedSec: p?.slowedSec ?? 0,
@@ -4840,16 +5241,33 @@ export class WorkspaceRoyaleEngine {
     else if (e.code === 'KeyR') this.startReload(p);
     else if (e.code === 'KeyE') this.tryPlayerInteract();
     else if (e.code === 'KeyQ') this.tryCastUltimate(p);
-    else if (e.code === 'KeyC' && !p.skyDropping && !this.isHealOrShieldChannel(p.channel)) {
-      this.crouchToggled = !this.crouchToggled;
+    else if (e.code === 'KeyC' && !p.skyDropping && !p.rewind.active) {
+      if (p.sliding) {
+        if (p.slideElapsed >= 0.15) {
+          this.endSlide(p, false);
+        }
+      } else if (!this.isHealOrShieldChannel(p.channel)) {
+        if (!this.tryStartSlide(p, false)) {
+          this.crouchToggled = !this.crouchToggled;
+        }
+      }
+    } else if (e.code === 'ControlLeft' && !p.skyDropping && !p.rewind.active) {
+      if (!p.sliding && !this.isHealOrShieldChannel(p.channel) && p.grounded) {
+        this.ctrlSlideConsumed = true;
+        this.tryStartSlide(p, true);
+      }
     }
   }
 
   private handleKeyUp(e: KeyboardEvent): void {
     this.keys.delete(e.code);
+    if (e.code === 'ControlLeft') {
+      this.ctrlSlideConsumed = false;
+    }
     if (!this.keys.has('ShiftLeft') && !this.keys.has('ShiftRight')) {
       this.sprintLatchedOnReload = false;
       this.sprintLatchedOnChannel = false;
+      this.sprintLatchedOnSlide = false;
     }
   }
 
@@ -4859,6 +5277,8 @@ export class WorkspaceRoyaleEngine {
     this.mouseRightDown = false;
     this.sprintLatchedOnReload = false;
     this.sprintLatchedOnChannel = false;
+    this.sprintLatchedOnSlide = false;
+    this.ctrlSlideConsumed = false;
   }
 
   private handleMouseDown(e: MouseEvent): void {
@@ -4926,6 +5346,8 @@ export class WorkspaceRoyaleEngine {
       this.mouseRightDown = false;
       this.sprintLatchedOnReload = false;
       this.sprintLatchedOnChannel = false;
+      this.sprintLatchedOnSlide = false;
+      this.ctrlSlideConsumed = false;
     }
     if (!this.pointerLocked && this.mapOpen) {
       return;
@@ -4946,6 +5368,8 @@ export class WorkspaceRoyaleEngine {
     this.disposed = true;
     this.sprintLatchedOnReload = false;
     this.sprintLatchedOnChannel = false;
+    this.sprintLatchedOnSlide = false;
+    this.ctrlSlideConsumed = false;
     cancelAnimationFrame(this.rafId);
     this.stopSplashAttract();
     window.removeEventListener('resize', this.onResizeBound);

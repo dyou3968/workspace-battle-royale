@@ -325,6 +325,7 @@ export interface ChannelState {
 
 export interface StatusEffectsState {
   crouching: boolean;
+  sliding: boolean;
   silencedSec: number;
   hastedSec: number;
   slowedSec: number;

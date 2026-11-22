@@ -3764,6 +3764,13 @@ input:focus-visible {
   color: #E8EAED;
 }
 
+.status-badge.slide {
+  background: linear-gradient(135deg, rgba(14, 116, 144, 0.92), rgba(26, 115, 232, 0.92));
+  border-color: #7DD3FC;
+  color: #E0F2FE;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.42);
+}
+
 .status-badge.silenced {
   background: rgba(179, 38, 30, 0.9);
   border-color: #F6AEA9;

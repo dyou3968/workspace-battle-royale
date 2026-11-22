@@ -16,6 +16,7 @@ interface Particle {
   ttl: number;
   startScale: number;
   endScale: number;
+  baseOpacity?: number;
 }
 
 interface FlashLight {
@@ -970,6 +971,104 @@ export class VfxSystem {
   }
 
   /**
+   * Surface-tinted dust puffs & friction debris kicking back-and-up behind a sliding hero's heels.
+   */
+  public spawnSlideDust(
+    pos: THREE.Vector3,
+    dirX: number,
+    dirZ: number,
+    surface: 'grass' | 'stone' | 'sand' | 'metal',
+    initialBurst = false
+  ): void {
+    const count = initialBurst ? 4 : Math.random() < 0.5 ? 2 : 3;
+    const palette: [number, number] =
+      surface === 'grass'
+        ? [0xd4e2b6, 0xa8c284]
+        : surface === 'sand'
+          ? [0xf0d6a4, 0xdfb974]
+          : surface === 'metal'
+            ? [0xdbe4ee, 0x94a3b8]
+            : [0xe8edf3, 0xcbd5e1];
+
+    const perpX = -dirZ;
+    const perpZ = dirX;
+
+    for (let i = 0; i < count; i++) {
+      if (this.particles.length > 180) break;
+      const lat = (Math.random() - 0.5) * 0.44;
+      const back = 0.08 + Math.random() * 0.30;
+      const startPos = new THREE.Vector3(
+        pos.x - dirX * back + perpX * lat,
+        pos.y + 0.05 + Math.random() * 0.08,
+        pos.z - dirZ * back + perpZ * lat
+      );
+      const backSpeed = 2.4 + Math.random() * 2.2;
+      const latSpeed = (Math.random() - 0.5) * 1.9;
+      const vel = new THREE.Vector3(
+        -dirX * backSpeed + perpX * latSpeed,
+        0.55 + Math.random() * 0.75,
+        -dirZ * backSpeed + perpZ * latSpeed
+      );
+      const baseOpacity = initialBurst ? 0.46 : 0.36;
+      const mat = new THREE.MeshBasicMaterial({
+        color: palette[i % 2],
+        transparent: true,
+        opacity: baseOpacity,
+        depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(this.unitSphereGeo, mat);
+      const startScale = (initialBurst ? 0.11 : 0.085) + Math.random() * 0.035;
+      const endScale = startScale * (2.2 + Math.random() * 0.55);
+      mesh.position.copy(startPos);
+      mesh.scale.setScalar(startScale);
+      this.scene.add(mesh);
+      this.particles.push({
+        mesh,
+        vel,
+        gravity: 1.6,
+        age: 0,
+        ttl: 0.28 + Math.random() * 0.14,
+        startScale,
+        endScale,
+        baseOpacity,
+      });
+    }
+
+    // Crisp surface flecks / sparks kicking up from sliding heel
+    if (this.particles.length <= 180) {
+      const sparkPos = new THREE.Vector3(
+        pos.x - dirX * 0.18 + perpX * (Math.random() - 0.5) * 0.28,
+        pos.y + 0.06,
+        pos.z - dirZ * 0.18 + perpZ * (Math.random() - 0.5) * 0.28
+      );
+      const sparkVel = new THREE.Vector3(
+        -dirX * (3.6 + Math.random() * 2.4) + perpX * (Math.random() - 0.5) * 2.4,
+        1.4 + Math.random() * 1.6,
+        -dirZ * (3.6 + Math.random() * 2.4) + perpZ * (Math.random() - 0.5) * 2.4
+      );
+      const sparkColor =
+        surface === 'metal'
+          ? Math.random() < 0.5
+            ? 0xfde68a
+            : 0x7dd3fc
+          : surface === 'grass'
+            ? 0xbef264
+            : surface === 'sand'
+              ? 0xfde08d
+              : 0xe2e8f0;
+      this.spawnSpark(
+        sparkPos,
+        sparkVel,
+        sparkColor,
+        0.24,
+        surface === 'metal' ? 0.72 : 0.42,
+        0.03,
+        14
+      );
+    }
+  }
+
+  /**
    * Builds a sleek curved translucent Hard-Light Cover energy barrier mesh.
    * Width ~3.8m, Height ~2.15m, grounded at local Y=0.
    */
@@ -1137,7 +1236,7 @@ export class VfxSystem {
       pt.mesh.rotation.y += dt * 5;
       const scale = pt.startScale + (pt.endScale - pt.startScale) * p;
       pt.mesh.scale.setScalar(Math.max(0.01, scale));
-      (pt.mesh.material as THREE.MeshBasicMaterial).opacity = 0.95 * (1 - p);
+      (pt.mesh.material as THREE.MeshBasicMaterial).opacity = (pt.baseOpacity ?? 0.95) * (1 - p);
     }
 
     // Update pooled flash lights

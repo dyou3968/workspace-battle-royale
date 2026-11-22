@@ -28,6 +28,10 @@ export interface HeroInstance {
   headNode: THREE.Object3D | null;
   leftHandNode: THREE.Object3D | null;
   rightHandNode: THREE.Object3D | null;
+  thighLNode: THREE.Object3D | null;
+  shinLNode: THREE.Object3D | null;
+  thighRNode: THREE.Object3D | null;
+  shinRNode: THREE.Object3D | null;
   gliderMount: THREE.Group;
   overheadGroup: THREE.Group;
   hpBarFill: THREE.Mesh;
@@ -715,11 +719,15 @@ export class AssetManager {
 
     root.add(model);
 
-    // Find Spine, Chest, Head, Hand_L, Hand_R, and WeaponSocket_R reliably inside cloned armature hierarchy
+    // Find Spine, Chest, Head, Hand_L, Hand_R, Thigh/Shin legs, and WeaponSocket_R reliably inside cloned armature hierarchy
     const spineNode = model.getObjectByName('Spine') ?? null;
     const chestNode = model.getObjectByName('Chest') ?? null;
     const leftHandNode = model.getObjectByName('Hand_L') ?? null;
     const rightHandNode = model.getObjectByName('Hand_R') ?? null;
+    const thighLNode = model.getObjectByName('Thigh_L') ?? null;
+    const shinLNode = model.getObjectByName('Shin_L') ?? null;
+    const thighRNode = model.getObjectByName('Thigh_R') ?? null;
+    const shinRNode = model.getObjectByName('Shin_R') ?? null;
 
     let weaponSocket = model.getObjectByName('WeaponSocket_R') ?? null;
     if (!weaponSocket) {
@@ -874,6 +882,10 @@ export class AssetManager {
       headNode,
       leftHandNode,
       rightHandNode,
+      thighLNode,
+      shinLNode,
+      thighRNode,
+      shinRNode,
       gliderMount,
       overheadGroup,
       hpBarFill,

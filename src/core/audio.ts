@@ -301,6 +301,32 @@ export class SoundEngine {
     this.playNoise('lowpass', 720, 200, 0.9, 0.14, hard ? 0.3 : 0.16);
   }
 
+  public playSlideStart(surface: 'grass' | 'stone' | 'sand' | 'metal' = 'stone'): void {
+    const startFreq =
+      surface === 'metal'
+        ? 2800
+        : surface === 'stone'
+          ? 1950
+          : surface === 'sand'
+            ? 1400
+            : 1150;
+    const endFreq =
+      surface === 'metal'
+        ? 760
+        : surface === 'stone'
+          ? 420
+          : surface === 'sand'
+            ? 360
+            : 280;
+    // Crisp downward-sweeping bandpass noise whoosh + surface skid + subtle bass thump
+    this.playNoise('bandpass', startFreq, endFreq, 1.3, 0.38, 0.28, 0);
+    this.playNoise('highpass', startFreq * 0.85, endFreq * 1.1, 1.6, 0.26, 0.12, 0.04);
+    this.playTone('sine', 128, 46, 0.14, 0.24, 0);
+    if (surface === 'metal') {
+      this.playTone('triangle', 1480, 620, 0.18, 0.08, 0.02);
+    }
+  }
+
   public setGliderWind(active: boolean, diving = false): void {
     if (!active) {
       if (this.gliderWindGain && this.ctx) {
