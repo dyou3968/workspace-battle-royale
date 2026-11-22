@@ -90,8 +90,8 @@ const FULL_MAP_LANDMARK_PILLS: FullMapLandmarkPill[] = [
   { label: 'B41', x: -112, z: -31, color: '#60a5fa' },
   { label: 'B42', x: -117, z: 24, color: '#2dd4bf' },
   { label: 'B43', x: -58, z: 35, color: '#fbbf24', highTier: true },
-  { label: 'CHARLESTON ART GARDEN', x: 30, z: -11, color: '#4ade80', highTier: true },
-  { label: 'CHARLESTON GYM', x: 32, z: 33, color: '#60a5fa' },
+  { label: 'CHARLESTON ART GARDEN', x: 24, z: -12, color: '#4ade80', highTier: true },
+  { label: 'CHARLESTON GYM', x: 16, z: 33, color: '#60a5fa' },
   { label: 'GRADIENT CANOPY', x: 113, z: 4, color: '#38bdf8', highTier: true },
   { label: 'THE ORB', x: 152, z: 60, color: '#c084fc', highTier: true },
   // North Ring
@@ -127,7 +127,7 @@ const FULL_MAP_ROAD_LABELS: RoadLabelSpec[] = [
   { label: 'CHARLESTON RD', x: 112, z: 73, angleDeg: 3.5 },
   { label: 'N SHORELINE BLVD', x: 168, z: -24, angleDeg: -90 },
   { label: 'PERMANENTE CREEK TRAIL', x: -150, z: -90, angleDeg: -90 },
-  { label: 'JOAQUIN RD', x: 57, z: 14, angleDeg: -88 },
+  { label: 'JOAQUIN RD', x: 60, z: 19, angleDeg: -82 },
   { label: 'ALTA / HUFF', x: -50, z: 112, angleDeg: -90 },
   { label: 'PLYMOUTH ST', x: -4, z: 179, angleDeg: 0 },
   { label: 'CRITTENDEN LN', x: 234, z: -108, angleDeg: 0 },
@@ -791,13 +791,16 @@ export class TacticalMinimap {
     // 10. Gradient Canopy (+113, +4; Diamond-Quilted White Dragonscale Roof)
     ctx.save();
     ctx.translate(proj.wx(113), proj.wz(4));
-    ctx.beginPath();
-    ctx.moveTo(proj.wr(-39), proj.wrZ(-41));
-    ctx.quadraticCurveTo(0, proj.wrZ(-49), proj.wr(37), proj.wrZ(-44));
-    ctx.quadraticCurveTo(proj.wr(47), 0, proj.wr(43), proj.wrZ(42));
-    ctx.quadraticCurveTo(proj.wr(4), proj.wrZ(52), proj.wr(-33), proj.wrZ(48));
-    ctx.quadraticCurveTo(proj.wr(-48), proj.wrZ(3), proj.wr(-39), proj.wrZ(-41));
-    ctx.closePath();
+    const traceCanopyOutline = (): void => {
+      ctx.beginPath();
+      ctx.moveTo(proj.wr(-39), proj.wrZ(-41));
+      ctx.quadraticCurveTo(0, proj.wrZ(-49), proj.wr(37), proj.wrZ(-44));
+      ctx.quadraticCurveTo(proj.wr(47), 0, proj.wr(43), proj.wrZ(42));
+      ctx.quadraticCurveTo(proj.wr(4), proj.wrZ(52), proj.wr(-33), proj.wrZ(48));
+      ctx.quadraticCurveTo(proj.wr(-48), proj.wrZ(3), proj.wr(-39), proj.wrZ(-41));
+      ctx.closePath();
+    };
+    traceCanopyOutline();
     ctx.fillStyle = 'rgba(241, 245, 249, 0.93)';
     ctx.fill();
 
@@ -818,6 +821,8 @@ export class TacticalMinimap {
     }
     ctx.restore();
 
+    // Re-trace the Gradient Canopy outline before stroking (ctx.restore does not restore paths)
+    traceCanopyOutline();
     ctx.strokeStyle = '#3b82f6';
     ctx.lineWidth = 1.0 * sw;
     ctx.stroke();
@@ -1069,41 +1074,6 @@ export class TacticalMinimap {
       }
       ctx.restore();
 
-      // Crisp Legible Named Landmark Pills (all 22 campus landmarks)
-      ctx.save();
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = '800 9.5px -apple-system, BlinkMacSystemFont, "Inter", sans-serif';
-      for (const lm of FULL_MAP_LANDMARK_PILLS) {
-        const cx = proj.wx(lm.x);
-        const cy = proj.wz(lm.z);
-        const textW = ctx.measureText(lm.label).width;
-        const dotSpace = 8;
-        const padX = 7;
-        const pillW = textW + padX * 2 + dotSpace;
-        const pillH = 16;
-        const x0 = Math.max(6, Math.min(proj.cssW - pillW - 6, cx - pillW * 0.5));
-        const y0 = Math.max(6, Math.min(proj.cssH - pillH - 6, cy - pillH * 0.5));
-
-        drawRoundedRectPath(ctx, x0, y0, pillW, pillH, 8);
-        ctx.fillStyle = 'rgba(7, 12, 24, 0.84)';
-        ctx.fill();
-        ctx.strokeStyle = lm.highTier ? lm.color : 'rgba(226, 232, 240, 0.34)';
-        ctx.lineWidth = lm.highTier ? 1.15 : 0.85;
-        ctx.stroke();
-
-        // Landmark accent dot
-        ctx.beginPath();
-        ctx.arc(x0 + padX + 2.5, y0 + pillH * 0.5, 2.4, 0, Math.PI * 2);
-        ctx.fillStyle = lm.color;
-        ctx.fill();
-
-        // Crisp pill label text
-        ctx.fillStyle = lm.highTier ? '#f8fafc' : '#e2e8f0';
-        ctx.fillText(lm.label, x0 + padX + dotSpace + textW * 0.5, y0 + pillH * 0.5 + 0.4);
-      }
-      ctx.restore();
-
       // North Compass Badge (top-left)
       ctx.save();
       drawRoundedRectPath(ctx, 12, 12, 28, 28, 8);
@@ -1148,6 +1118,47 @@ export class TacticalMinimap {
       ctx.restore();
     }
 
+    ctx.restore();
+  }
+
+  /**
+   * Draws the 22 crisp named landmark pills on the Full Tactical Map dynamically
+   * after Loot Chests & Supply Drops so chest icons never overlap landmark names,
+   * and before Enemies, Waypoint, and the Player Marker so active tactical icons sit on top.
+   */
+  private drawFullMapLandmarkPills(ctx: CanvasRenderingContext2D, proj: MapProjection): void {
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '800 9.5px -apple-system, BlinkMacSystemFont, "Inter", sans-serif';
+    for (const lm of FULL_MAP_LANDMARK_PILLS) {
+      const cx = proj.wx(lm.x);
+      const cy = proj.wz(lm.z);
+      const textW = ctx.measureText(lm.label).width;
+      const dotSpace = 8;
+      const padX = 7;
+      const pillW = textW + padX * 2 + dotSpace;
+      const pillH = 16;
+      const x0 = Math.max(6, Math.min(proj.cssW - pillW - 6, cx - pillW * 0.5));
+      const y0 = Math.max(6, Math.min(proj.cssH - pillH - 6, cy - pillH * 0.5));
+
+      drawRoundedRectPath(ctx, x0, y0, pillW, pillH, 8);
+      ctx.fillStyle = 'rgba(7, 12, 24, 0.86)';
+      ctx.fill();
+      ctx.strokeStyle = lm.highTier ? lm.color : 'rgba(226, 232, 240, 0.34)';
+      ctx.lineWidth = lm.highTier ? 1.15 : 0.85;
+      ctx.stroke();
+
+      // Landmark accent dot
+      ctx.beginPath();
+      ctx.arc(x0 + padX + 2.5, y0 + pillH * 0.5, 2.4, 0, Math.PI * 2);
+      ctx.fillStyle = lm.color;
+      ctx.fill();
+
+      // Crisp pill label text
+      ctx.fillStyle = lm.highTier ? '#f8fafc' : '#e2e8f0';
+      ctx.fillText(lm.label, x0 + padX + dotSpace + textW * 0.5, y0 + pillH * 0.5 + 0.4);
+    }
     ctx.restore();
   }
 
@@ -1318,6 +1329,11 @@ export class TacticalMinimap {
       ctx.restore();
     }
 
+    // 4b. Full Tactical Map Named Landmark Pills (drawn above chests/drops, below enemies/waypoint/player)
+    if (detailed) {
+      this.drawFullMapLandmarkPills(ctx, proj);
+    }
+
     // 5. Nearby / Chat-Revealed Enemies
     for (const enemy of state.enemies) {
       const ex = proj.wx(enemy.x);
@@ -1433,17 +1449,20 @@ export class TacticalMinimap {
       ctx.restore();
     }
 
-    // 6. Player Heading Vision Cone & Directional Arrow
+    // 6. High-Contrast Prominent Player Marker (Vision Cone, Pulsing Rings, Contrast Halo, Chevron & "YOU" Pill)
     // Standard Three.js yaw convention:
     // forward = (-sin(yaw), -cos(yaw)) in (X, Z) => on canvas (+X right, +Z down),
     // atan2(fwdZ, fwdX) = atan2(-cos(yaw), -sin(yaw)) = -PI/2 - yaw.
     const fwdCanvasAngle = -Math.PI / 2 - state.playerYaw;
-    const coneHalf = 0.44;
-    const coneLen = detailed ? 44 : 20;
+    const coneHalf = 0.46;
+    const coneLen = detailed ? 56 : 24;
 
-    const coneGrad = ctx.createRadialGradient(px, py, 2, px, py, coneLen);
-    coneGrad.addColorStop(0, 'rgba(96, 165, 250, 0.55)');
-    coneGrad.addColorStop(1, 'rgba(96, 165, 250, 0)');
+    // 6a. Warm bright gold-white Vision Cone with crisp fading edge rays (high-contrast over lawns, roads & blue roofs)
+    ctx.save();
+    const coneGrad = ctx.createRadialGradient(px, py, detailed ? 3 : 1.5, px, py, coneLen);
+    coneGrad.addColorStop(0, 'rgba(255, 241, 168, 0.58)');
+    coneGrad.addColorStop(0.55, 'rgba(251, 188, 4, 0.14)');
+    coneGrad.addColorStop(1, 'rgba(251, 188, 4, 0)');
     ctx.beginPath();
     ctx.moveTo(px, py);
     ctx.arc(px, py, coneLen, fwdCanvasAngle - coneHalf, fwdCanvasAngle + coneHalf);
@@ -1451,11 +1470,72 @@ export class TacticalMinimap {
     ctx.fillStyle = coneGrad;
     ctx.fill();
 
-    // Player chevron arrow
+    const edgeGrad = ctx.createRadialGradient(px, py, detailed ? 4 : 2, px, py, coneLen);
+    edgeGrad.addColorStop(0, 'rgba(255, 248, 204, 0.65)');
+    edgeGrad.addColorStop(0.65, 'rgba(251, 188, 4, 0.28)');
+    edgeGrad.addColorStop(1, 'rgba(251, 188, 4, 0)');
+    ctx.strokeStyle = edgeGrad;
+    ctx.lineWidth = detailed ? 1.3 : 0.85;
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(
+      px + Math.cos(fwdCanvasAngle - coneHalf) * coneLen,
+      py + Math.sin(fwdCanvasAngle - coneHalf) * coneLen
+    );
+    ctx.moveTo(px, py);
+    ctx.lineTo(
+      px + Math.cos(fwdCanvasAngle + coneHalf) * coneLen,
+      py + Math.sin(fwdCanvasAngle + coneHalf) * coneLen
+    );
+    ctx.stroke();
+    ctx.restore();
+
+    // 6b. Animated Double Pulsing Radar Locator Rings (Google Yellow + staggered white beacon on full map)
+    const radarPulse1 = (((timeSec * 0.9) % 1) + 1) % 1;
+    const minRingR = detailed ? 11 : 5;
+    const maxRingR = detailed ? 30 : 14;
+    const ring1R = minRingR + radarPulse1 * (maxRingR - minRingR);
+    const ring1Alpha = 0.95 * (1 - radarPulse1);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(px, py, ring1R, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(251, 188, 4, ${ring1Alpha.toFixed(3)})`;
+    ctx.lineWidth = detailed ? 2.6 : 1.5;
+    ctx.stroke();
+
+    if (detailed) {
+      const radarPulse2 = (radarPulse1 + 0.5) % 1;
+      const ring2R = minRingR + radarPulse2 * (maxRingR - minRingR);
+      const ring2Alpha = 0.72 * (1 - radarPulse2);
+      ctx.beginPath();
+      ctx.arc(px, py, ring2R, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255, 255, 255, ${ring2Alpha.toFixed(3)})`;
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // 6c. Solid Dark Contrast Disk Halo + Crisp Google Yellow Border Ring right behind the player chevron
+    ctx.save();
+    const haloR = detailed ? 11.5 : 5.8;
+    ctx.beginPath();
+    ctx.arc(px, py, haloR, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.shadowColor = 'rgba(251, 188, 4, 0.52)';
+    ctx.shadowBlur = detailed ? 10 : 5;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#FBBC04';
+    ctx.lineWidth = detailed ? 2.2 : 1.3;
+    ctx.stroke();
+    ctx.restore();
+
+    // 6d. Bold High-Contrast Directional Player Chevron
     ctx.save();
     ctx.translate(px, py);
     ctx.rotate(fwdCanvasAngle + Math.PI / 2);
-    const arrowScale = detailed ? 1.85 : 1.0;
+    const arrowScale = detailed ? 2.35 : 1.35;
     ctx.beginPath();
     ctx.moveTo(0, -4.8 * arrowScale);
     ctx.lineTo(3.5 * arrowScale, 3.7 * arrowScale);
@@ -1464,10 +1544,43 @@ export class TacticalMinimap {
     ctx.closePath();
     ctx.fillStyle = '#ffffff';
     ctx.fill();
-    ctx.strokeStyle = '#2563eb';
-    ctx.lineWidth = detailed ? 2.0 : 1.15;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = detailed ? 2.2 : 1.3;
     ctx.stroke();
     ctx.restore();
+
+    // 6e. Floating "YOU" Pill Badge (drawn LAST on Full Tactical Map so nothing ever covers it)
+    if (detailed) {
+      ctx.save();
+      ctx.font = '900 10.5px -apple-system, BlinkMacSystemFont, "Inter", sans-serif';
+      const youLabel = 'YOU';
+      const tw = ctx.measureText(youLabel).width;
+      const pw = Math.ceil(tw + 14);
+      const ph = 17;
+      const pillX = Math.max(8, Math.min(proj.cssW - pw - 8, px - pw * 0.5));
+      const rawPillY = py < 36 ? py + 17 : py - 17 - ph;
+      const pillY = Math.max(6, Math.min(proj.cssH - ph - 6, rawPillY));
+
+      drawRoundedRectPath(ctx, pillX, pillY, pw, ph, 8.5);
+      ctx.shadowColor = 'rgba(15, 23, 42, 0.72)';
+      ctx.shadowBlur = 6;
+      ctx.shadowOffsetY = 2;
+      ctx.fillStyle = '#FBBC04';
+      ctx.fill();
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+
+      ctx.fillStyle = '#0f172a';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(youLabel, pillX + pw * 0.5, pillY + ph * 0.5 + 0.5);
+      ctx.restore();
+    }
   }
 
   /**
