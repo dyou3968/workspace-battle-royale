@@ -235,8 +235,10 @@ interface Combatant {
     chest: THREE.Quaternion;
     thighL: THREE.Quaternion;
     shinL: THREE.Quaternion;
+    footL: THREE.Quaternion;
     thighR: THREE.Quaternion;
     shinR: THREE.Quaternion;
+    footR: THREE.Quaternion;
     upperArmL: THREE.Quaternion;
     lowerArmL: THREE.Quaternion;
     upperArmR: THREE.Quaternion;
@@ -549,6 +551,12 @@ export class WorkspaceRoyaleEngine {
   private readonly tmpIkE = new THREE.Vector3();
   private readonly tmpIkTarget = new THREE.Vector3();
   private readonly tmpIkPole = new THREE.Vector3();
+  private readonly tmpSlideCurFoot = new THREE.Vector3();
+  private readonly tmpSlideCurKnee = new THREE.Vector3();
+  private readonly tmpSlidePrePole = new THREE.Vector3();
+  private readonly tmpSlideRootQuat = new THREE.Quaternion();
+  private readonly tmpSlideFootQuat = new THREE.Quaternion();
+  private readonly tmpSlideEuler = new THREE.Euler(0, 0, 0, 'YXZ');
   private readonly tmpQuatA = new THREE.Quaternion();
   private readonly tmpQuatB = new THREE.Quaternion();
   private readonly tmpQuatC = new THREE.Quaternion();
@@ -557,8 +565,10 @@ export class WorkspaceRoyaleEngine {
     chest: new THREE.Quaternion(),
     thighL: new THREE.Quaternion(),
     shinL: new THREE.Quaternion(),
+    footL: new THREE.Quaternion(),
     thighR: new THREE.Quaternion(),
     shinR: new THREE.Quaternion(),
+    footR: new THREE.Quaternion(),
     upperArmL: new THREE.Quaternion(),
     lowerArmL: new THREE.Quaternion(),
     upperArmR: new THREE.Quaternion(),
@@ -1147,8 +1157,10 @@ export class WorkspaceRoyaleEngine {
         chest: new THREE.Quaternion(),
         thighL: new THREE.Quaternion(),
         shinL: new THREE.Quaternion(),
+        footL: new THREE.Quaternion(),
         thighR: new THREE.Quaternion(),
         shinR: new THREE.Quaternion(),
+        footR: new THREE.Quaternion(),
         upperArmL: new THREE.Quaternion(),
         lowerArmL: new THREE.Quaternion(),
         upperArmR: new THREE.Quaternion(),
@@ -2042,7 +2054,8 @@ export class WorkspaceRoyaleEngine {
       this.audio.playSlideStart(p.surface);
     }
 
-    this.vfx.spawnSlideDust(p.pos, p.slideDirX, p.slideDirZ, p.surface, true);
+    this.tmpVecA.set(p.pos.x + p.slideDirX * 0.42, p.pos.y + 0.01, p.pos.z + p.slideDirZ * 0.42);
+    this.vfx.spawnSlideDust(this.tmpVecA, p.slideDirX, p.slideDirZ, p.surface, true);
     return true;
   }
 
@@ -2774,7 +2787,12 @@ export class WorkspaceRoyaleEngine {
         p.slideVfxTimer -= dt;
         if (p.slideVfxTimer <= 0) {
           p.slideVfxTimer = 0.045;
-          this.vfx.spawnSlideDust(p.pos, p.slideDirX, p.slideDirZ, p.surface);
+          this.tmpVecA.set(
+            p.pos.x + p.slideDirX * 0.42,
+            p.pos.y + 0.01,
+            p.pos.z + p.slideDirZ * 0.42
+          );
+          this.vfx.spawnSlideDust(this.tmpVecA, p.slideDirX, p.slideDirZ, p.surface);
         }
       }
 
@@ -5234,8 +5252,10 @@ export class WorkspaceRoyaleEngine {
       chestNode,
       thighLNode,
       shinLNode,
+      footLNode,
       thighRNode,
       shinRNode,
+      footRNode,
       upperArmLNode,
       lowerArmLNode,
       upperArmRNode,
@@ -5246,8 +5266,10 @@ export class WorkspaceRoyaleEngine {
     if (chestNode) chestNode.quaternion.premultiply(u.chest).normalize();
     if (thighLNode) thighLNode.quaternion.premultiply(u.thighL).normalize();
     if (shinLNode) shinLNode.quaternion.premultiply(u.shinL).normalize();
+    if (footLNode) footLNode.quaternion.premultiply(u.footL).normalize();
     if (thighRNode) thighRNode.quaternion.premultiply(u.thighR).normalize();
     if (shinRNode) shinRNode.quaternion.premultiply(u.shinR).normalize();
+    if (footRNode) footRNode.quaternion.premultiply(u.footR).normalize();
     if (upperArmLNode) upperArmLNode.quaternion.premultiply(u.upperArmL).normalize();
     if (lowerArmLNode) lowerArmLNode.quaternion.premultiply(u.lowerArmL).normalize();
     if (upperArmRNode) upperArmRNode.quaternion.premultiply(u.upperArmR).normalize();
@@ -5256,19 +5278,34 @@ export class WorkspaceRoyaleEngine {
   }
 
   /**
-   * Applies procedural athletic tactical slide bone offsets (after `mixer.update` and before
-   * `alignWeaponTwoHanded`) around the hero's right (+X) axis:
-   * - Counter-pitches `Spine` & `Chest` upright so torso, head, and two-handed weapon stay aimed level on target
-   * - Extends lead leg (`Thigh_L` / `Shin_L`) forward, heel skimming the ground
-   * - Tucks trail leg (`Thigh_R` / `Shin_R`) cleanly beneath the hip above ground level
+   * Applies procedural athletic feet-first tactical slide pose (after `mixer.update` and before
+   * `alignWeaponTwoHanded`) using zero-allocation analytical 2-bone leg IK + boot heel-first pitch
+   * + exact ground-surface floor-clearance clamping:
+   * - Counter-pitches `Spine` & `Chest` upright so torso, head, and two-handed weapon aim dead-level forward
+   * - Solves both legs (`Thigh/Shin/Foot_L` lead & `Thigh/Shin/Foot_R` trail) forward along `-Z` strictly ON TOP of the map
+   * - Tilts both boots slightly toes-up (heel-first) so neither heel nor toe ever dips below floor
+   * - Verifies live world-space ankle, boot-sole (heel/toe/edges), knee, and hip clearance on flat & sloped ground
    */
   private applySlideBonePose(c: Combatant, blend: number): void {
-    const { spineNode, chestNode, thighLNode, shinLNode, thighRNode, shinRNode, model, root } = c.hero;
+    const {
+      spineNode,
+      chestNode,
+      thighLNode,
+      shinLNode,
+      footLNode,
+      thighRNode,
+      shinRNode,
+      footRNode,
+      model,
+      root,
+    } = c.hero;
     if (blend <= 0.001) return;
 
     root.updateMatrixWorld(true);
+    root.getWorldQuaternion(this.tmpSlideRootQuat);
+
+    // 1. Counter-pitch upper body upright around model +X so torso, head & rifle aim dead-level forward
     model.getWorldQuaternion(this.tmpQuatC);
-    // Hero right (+X) axis in world space (positive rotation leans +Y -> +Z back, swings -Y -> -Z forward)
     this.tmpVecA.set(1, 0, 0).applyQuaternion(this.tmpQuatC).normalize();
 
     const applyAxisRot = (node: THREE.Object3D | null, angleRad: number): void => {
@@ -5276,21 +5313,143 @@ export class WorkspaceRoyaleEngine {
       node.parent.getWorldQuaternion(this.tmpQuatA).invert();
       this.tmpVecB.copy(this.tmpVecA).applyQuaternion(this.tmpQuatA).normalize();
       this.tmpQuatB.setFromAxisAngle(this.tmpVecB, angleRad);
-      node.quaternion.premultiply(this.tmpQuatB);
+      node.quaternion.premultiply(this.tmpQuatB).normalize();
       node.updateMatrixWorld(true);
     };
 
-    // Counter-pitch upper body upright (negative rotates +Y forward toward -Z) so head & rifle aim dead-level forward
-    applyAxisRot(spineNode, -0.20 * blend);
-    applyAxisRot(chestNode, -0.30 * blend);
+    applyAxisRot(spineNode, -0.24 * blend);
+    applyAxisRot(chestNode, -0.32 * blend);
 
-    // Lead leg (Left): extend forward heel-first, skimming cleanly on top of the floor
-    applyAxisRot(thighLNode, -0.16 * blend);
-    applyAxisRot(shinLNode, 1.05 * blend);
+    // Terrain/surface floor height helper (never drops below c.pos.y; climbs smoothly on uphill slopes/ramps)
+    const getFloorY = (wx: number, wz: number): number => {
+      if (!c.grounded) return c.pos.y;
+      const supportY = this.physics.getSupportHeight(wx, wz, c.pos.y, 0.10, 0.42);
+      return Math.max(c.pos.y, Math.min(supportY, c.pos.y + 0.36));
+    };
 
-    // Trail leg (Right): tuck thigh & shin compactly beneath hip with knee & boot cleanly above floor
-    applyAxisRot(thighRNode, -0.44 * blend);
-    applyAxisRot(shinRNode, -0.46 * blend);
+    // 2. Smoothly blended 2-bone leg IK toward forward (-Z) above-ground foot targets
+    const solveSlideLeg = (
+      thigh: THREE.Object3D | null,
+      shin: THREE.Object3D | null,
+      foot: THREE.Object3D | null,
+      targetLocalX: number,
+      targetLocalY: number,
+      targetLocalZ: number,
+      poleLocalX: number,
+      poleLocalY: number,
+      poleLocalZ: number
+    ): void => {
+      if (!thigh || !shin || !foot) return;
+
+      thigh.getWorldPosition(this.tmpIkA);
+      shin.getWorldPosition(this.tmpSlideCurKnee);
+      foot.getWorldPosition(this.tmpSlideCurFoot);
+
+      // Desired full-slide pole vector in world space
+      this.tmpIkPole.set(poleLocalX, poleLocalY, poleLocalZ).applyQuaternion(this.tmpSlideRootQuat).normalize();
+
+      // Current pre-IK knee bend plane (ensures 100% pop-free blend from blend=0..1)
+      this.tmpIkD.copy(this.tmpSlideCurFoot).sub(this.tmpIkA);
+      const curDist = this.tmpIkD.length();
+      if (curDist > 1e-4) {
+        this.tmpIkD.divideScalar(curDist);
+        this.tmpSlidePrePole.copy(this.tmpSlideCurKnee).sub(this.tmpIkA);
+        this.tmpSlidePrePole.addScaledVector(this.tmpIkD, -this.tmpSlidePrePole.dot(this.tmpIkD));
+        if (this.tmpSlidePrePole.lengthSq() > 1e-6) {
+          this.tmpSlidePrePole.normalize();
+          this.tmpIkPole.lerpVectors(this.tmpSlidePrePole, this.tmpIkPole, blend);
+          if (this.tmpIkPole.lengthSq() > 1e-6) {
+            this.tmpIkPole.normalize();
+          } else {
+            this.tmpIkPole.set(poleLocalX, poleLocalY, poleLocalZ).applyQuaternion(this.tmpSlideRootQuat).normalize();
+          }
+        }
+      }
+
+      // Compute full-slide world target & lift cleanly above local terrain/ramp height
+      this.tmpIkTarget.set(targetLocalX, targetLocalY, targetLocalZ);
+      root.localToWorld(this.tmpIkTarget);
+      const targetFloorY = getFloorY(this.tmpIkTarget.x, this.tmpIkTarget.z);
+      this.tmpIkTarget.y = Math.max(this.tmpIkTarget.y, targetFloorY + targetLocalY);
+
+      // Blend from live pre-IK ankle position to forward slide target, keeping above ground mid-transition
+      this.tmpIkTarget.lerpVectors(this.tmpSlideCurFoot, this.tmpIkTarget, blend);
+      if (blend > 0.08) {
+        const curFloorY = getFloorY(this.tmpIkTarget.x, this.tmpIkTarget.z);
+        this.tmpIkTarget.y = Math.max(this.tmpIkTarget.y, curFloorY + 0.115 * blend);
+      }
+
+      this.solveTwoBoneIK(thigh, shin, foot, this.tmpIkTarget, this.tmpIkPole);
+    };
+
+    // Lead Left Foot: stretches long & low forward along -Z, skimming flush heel-first on top of the map
+    solveSlideLeg(thighLNode, shinLNode, footLNode, -0.15, 0.118, -0.68, -0.24, 0.94, -0.22);
+    // Trail Right Foot: moves forward in front of pelvis with low outward-flared athletic baseball-slide knee
+    solveSlideLeg(thighRNode, shinRNode, footRNode, +0.22, 0.114, -0.44, +0.92, 0.34, -0.18);
+
+    // 3. Orient both boots heel-first (toes tilted slightly up) so neither heel nor toe clips below ground
+    // Exact flat-sole Foot bone pitch in hero root space from build_characters.py: -PI/2 - atan2(0.068, 0.142) = -2.0174 rad
+    const BOOT_FLAT_PITCH_X = -2.0174;
+    const orientSlideBoot = (
+      foot: THREE.Object3D | null,
+      toeUpRad: number,
+      yawFlareRad: number
+    ): void => {
+      if (!foot || !foot.parent) return;
+      this.tmpSlideEuler.set(BOOT_FLAT_PITCH_X + toeUpRad, yawFlareRad, 0, 'YXZ');
+      this.tmpSlideFootQuat.setFromEuler(this.tmpSlideEuler);
+      this.tmpSlideFootQuat.premultiply(this.tmpSlideRootQuat);
+      foot.parent.getWorldQuaternion(this.tmpQuatA).invert();
+      this.tmpSlideFootQuat.premultiply(this.tmpQuatA).normalize();
+      foot.quaternion.slerp(this.tmpSlideFootQuat, blend).normalize();
+      foot.updateMatrixWorld(true);
+    };
+
+    orientSlideBoot(footLNode, 0.36, +0.08);
+    orientSlideBoot(footRNode, 0.20, -0.26);
+
+    // 4. Mathematical floor-clearance clamp (0 mm underground guarantee on flat & sloped terrain!)
+    root.updateMatrixWorld(true);
+    let maxDeficit = 0;
+
+    const checkNodeClearance = (node: THREE.Object3D | null, minClearance: number): void => {
+      if (!node) return;
+      node.getWorldPosition(this.tmpVecA);
+      const floorY = getFloorY(this.tmpVecA.x, this.tmpVecA.z);
+      const deficit = floorY + minClearance - this.tmpVecA.y;
+      if (deficit > maxDeficit) maxDeficit = deficit;
+    };
+
+    const checkBootSoleProbes = (foot: THREE.Object3D | null): void => {
+      if (!foot) return;
+      // Exact sneaker-boot sole extreme points transformed into Foot bone-local space:
+      // Heel bottom (0, -0.021, -0.114), Toe bottom (0, +0.208, -0.005), Outer/Inner sole edges (±0.056, +0.032, -0.089)
+      const checkProbe = (lx: number, ly: number, lz: number): void => {
+        this.tmpVecA.set(lx, ly, lz);
+        foot.localToWorld(this.tmpVecA);
+        const floorY = getFloorY(this.tmpVecA.x, this.tmpVecA.z);
+        const deficit = floorY + 0.005 - this.tmpVecA.y;
+        if (deficit > maxDeficit) maxDeficit = deficit;
+      };
+      checkProbe(0, -0.021, -0.114);
+      checkProbe(0, +0.208, -0.005);
+      checkProbe(-0.056, +0.032, -0.089);
+      checkProbe(+0.056, +0.032, -0.089);
+    };
+
+    checkNodeClearance(footLNode, 0.105);
+    checkNodeClearance(footRNode, 0.105);
+    checkBootSoleProbes(footLNode);
+    checkBootSoleProbes(footRNode);
+    checkNodeClearance(shinLNode, 0.13);
+    checkNodeClearance(shinRNode, 0.13);
+    checkNodeClearance(thighLNode, 0.24);
+    checkNodeClearance(thighRNode, 0.24);
+
+    if (maxDeficit > 0.0005) {
+      model.position.y += maxDeficit;
+      root.updateMatrixWorld(true);
+    }
   }
 
   /**
@@ -5733,7 +5892,7 @@ export class WorkspaceRoyaleEngine {
 
       const b = c.slidePoseBlend;
       // Positive rotation.x leans hero BACK (feet-first forward toward -Z) in Three.js model space
-      const slideBackLean = 0.46 * b;
+      const slideBackLean = 0.56 * b;
       const slideHipBank = -0.14 * b * (c.isAds ? 0.15 : 1.0);
       c.hero.model.rotation.x = THREE.MathUtils.lerp(c.leanPitch, slideBackLean, b);
       c.hero.model.rotation.z = THREE.MathUtils.lerp(c.leanBank, slideHipBank, b);
@@ -5755,7 +5914,8 @@ export class WorkspaceRoyaleEngine {
         scaleXZ = 1 - stretch * 0.025;
       }
       c.hero.model.scale.set(scaleXZ, scaleY, scaleXZ);
-      c.hero.model.position.set(0, -0.13 * b, 0);
+      // Lower pelvis smoothly to sleek athletic slide height (~0.36-0.38m) while 2-bone leg IK + floor clamp keep boots 100% on top of ground
+      c.hero.model.position.set(0, -0.10 * b, -0.28 * b);
     }
 
     // 5. Restore clean clip quaternions before advancing Blender skeletal animation mixer
@@ -5776,8 +5936,10 @@ export class WorkspaceRoyaleEngine {
         chestNode,
         thighLNode,
         shinLNode,
+        footLNode,
         thighRNode,
         shinRNode,
+        footRNode,
         upperArmLNode,
         lowerArmLNode,
         upperArmRNode,
@@ -5788,8 +5950,10 @@ export class WorkspaceRoyaleEngine {
       if (chestNode) pre.chest.copy(chestNode.quaternion);
       if (thighLNode) pre.thighL.copy(thighLNode.quaternion);
       if (shinLNode) pre.shinL.copy(shinLNode.quaternion);
+      if (footLNode) pre.footL.copy(footLNode.quaternion);
       if (thighRNode) pre.thighR.copy(thighRNode.quaternion);
       if (shinRNode) pre.shinR.copy(shinRNode.quaternion);
+      if (footRNode) pre.footR.copy(footRNode.quaternion);
       if (upperArmLNode) pre.upperArmL.copy(upperArmLNode.quaternion);
       if (lowerArmLNode) pre.lowerArmL.copy(lowerArmLNode.quaternion);
       if (upperArmRNode) pre.upperArmR.copy(upperArmRNode.quaternion);
@@ -5819,8 +5983,10 @@ export class WorkspaceRoyaleEngine {
       storeUndo(chestNode, pre.chest, u.chest);
       storeUndo(thighLNode, pre.thighL, u.thighL);
       storeUndo(shinLNode, pre.shinL, u.shinL);
+      storeUndo(footLNode, pre.footL, u.footL);
       storeUndo(thighRNode, pre.thighR, u.thighR);
       storeUndo(shinRNode, pre.shinR, u.shinR);
+      storeUndo(footRNode, pre.footR, u.footR);
       storeUndo(upperArmLNode, pre.upperArmL, u.upperArmL);
       storeUndo(lowerArmLNode, pre.lowerArmL, u.lowerArmL);
       storeUndo(upperArmRNode, pre.upperArmR, u.upperArmR);
