@@ -3298,7 +3298,7 @@ input:focus-visible {
   border: 1.5px solid rgba(66, 133, 244, 0.65);
   backdrop-filter: blur(10px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.36);
-  min-width: 360px;
+  min-width: 230px;
 }
 
 .skydrop-row {
@@ -3325,10 +3325,6 @@ input:focus-visible {
 .skydrop-text strong {
   color: var(--g-yellow);
   font-family: var(--font-mono);
-}
-
-.skydrop-text b {
-  color: #FFFFFF;
 }
 
 .skydrop-bar-track {
@@ -3358,7 +3354,7 @@ input:focus-visible {
   backdrop-filter: blur(8px);
 }
 
-/* TOP-RIGHT: KILL FEED & COMPACT CONTROLS */
+/* TOP-RIGHT: KILL FEED */
 .hud-top-right {
   position: absolute;
   top: 14px;
@@ -3427,24 +3423,6 @@ input:focus-visible {
 @keyframes slideKill {
   from { opacity: 0; transform: translateX(14px); }
   to { opacity: 1; transform: translateX(0); }
-}
-
-.controls-mini {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 4px 8px;
-  padding: 6px 11px;
-  border-radius: 12px;
-  background: rgba(24, 28, 36, 0.66);
-  border: 1px solid var(--hud-border);
-  font-size: 10px;
-  color: #BDC1C6;
-}
-
-.controls-mini b {
-  color: #FFFFFF;
-  font-weight: 700;
 }
 
 /* ==================== CENTER COMBAT INDICATORS ==================== */
@@ -4302,7 +4280,9 @@ input:focus-visible {
 }
 
 .gameover-card {
-  width: min(580px, 94vw);
+  width: min(470px, 94vw);
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
 }
 
 .placement-badge {
@@ -4329,53 +4309,58 @@ input:focus-visible {
   color: var(--g-red-ink);
 }
 
-.summary-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-bottom: 22px;
-}
-
-.summary-stats-7 {
-  grid-template-columns: repeat(12, 1fr);
-}
-
-.sum-span-4 { grid-column: span 4; }
-.sum-span-3 { grid-column: span 3; }
-
-@media (max-width: 560px) {
-  .summary-stats,
-  .summary-stats-7 {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .sum-span-4,
-  .sum-span-3 {
-    grid-column: auto;
-  }
-}
-
-.sum-stat {
-  padding: 12px 10px;
-  border-radius: 14px;
+.summary-stats-list {
+  list-style: none;
+  margin: 0 0 22px;
+  padding: 8px 18px;
+  border-radius: 16px;
   background: var(--ws-surface-low);
   border: 1px solid var(--ws-border-subtle);
+  text-align: left;
+}
+
+.sum-bullet-item {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--ws-border-subtle);
+}
+
+.sum-bullet-item:last-child {
+  border-bottom: none;
+}
+
+.sum-bullet-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sum-bullet-left::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--g-blue);
+  flex-shrink: 0;
 }
 
 .sum-label {
-  font-size: 11px;
+  font-size: 13.5px;
   font-weight: 500;
-  color: var(--ws-ink-muted);
+  color: var(--ws-ink-secondary);
 }
 
 .sum-val {
   font-family: var(--font-display);
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   color: var(--ws-ink);
+  text-align: right;
 }
 
 .sum-gold {
@@ -4387,18 +4372,48 @@ input:focus-visible {
   gap: 10px;
 }
 
-.modal-actions-3 .btn-primary {
-  flex: 1.25;
+.modal-actions-3 button {
+  width: auto;
+  padding: 0 14px;
+  font-size: 13.5px;
+  white-space: nowrap;
 }
 
-.modal-actions-3 .btn-tonal,
+.modal-actions-3 .btn-primary {
+  flex: 1.15;
+}
+
+.modal-actions-3 .btn-tonal {
+  flex: 1.35;
+}
+
 .modal-actions-3 .btn-outlined {
-  flex: 1;
+  flex: 0.78;
 }
 
 @media (max-width: 560px) {
+  .gameover-card {
+    padding: 22px 20px;
+  }
+
+  .summary-stats-list {
+    padding: 6px 14px;
+    margin-bottom: 18px;
+  }
+
+  .sum-bullet-item {
+    padding: 8px 0;
+  }
+
   .modal-actions-3 {
     flex-direction: column;
+  }
+
+  .modal-actions-3 .btn-primary,
+  .modal-actions-3 .btn-tonal,
+  .modal-actions-3 .btn-outlined {
+    width: 100%;
+    flex: none;
   }
 }
 
@@ -4657,12 +4672,6 @@ input:focus-visible {
 }
 
 /* ==================== RESPONSIVE IN-GAME HUD & TACTICAL MAP BREAKPOINTS ==================== */
-@media (max-width: 900px) {
-  .controls-mini {
-    display: none;
-  }
-}
-
 @media (max-width: 760px) {
   .hud-top-left {
     top: 10px;

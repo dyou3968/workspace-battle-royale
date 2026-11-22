@@ -1234,7 +1234,17 @@ function closeFullMap(resumeLock = true): void {
 
 // ==================== HUD RENDERING ====================
 function showBanner(title: string, subtitle?: string): void {
-  bannerToast.textContent = subtitle ? `${title} — ${subtitle}` : title;
+  let cleanSubtitle = subtitle;
+  if (cleanSubtitle) {
+    if (title === 'DROP INTO GOOGLEPLEX') {
+      cleanSubtitle = undefined;
+    } else if (title.startsWith('TOUCHDOWN') && cleanSubtitle.includes(' · ')) {
+      cleanSubtitle = cleanSubtitle.split(' · ')[0];
+    } else if (/\[(?:E|1–5|Q|R|M)\]|WASD|SHIFT/i.test(cleanSubtitle)) {
+      cleanSubtitle = undefined;
+    }
+  }
+  bannerToast.textContent = cleanSubtitle ? `${title} — ${cleanSubtitle}` : title;
   bannerToast.classList.remove('hidden');
   clearTimeout(bannerTimer);
   bannerTimer = window.setTimeout(() => bannerToast.classList.add('hidden'), 3200);
@@ -1583,7 +1593,7 @@ function renderHud(state: HudSnapshot): void {
   };
   if (!active) {
     if (isUnarmed) {
-      setTextCached(activeItemName, 'Unarmed — Find & Open Chests [E]');
+      setTextCached(activeItemName, 'Unarmed');
       setActiveColor('#FBBC04');
       setTextCached(activeItemAmmo, 'NO WEAPON');
     } else {

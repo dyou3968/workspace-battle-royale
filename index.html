@@ -918,7 +918,7 @@
             <div class="skydrop-row">
               <span class="skydrop-badge">SKY DROP</span>
               <span class="skydrop-text">
-                ALTITUDE: <strong id="skydrop-alt">135m</strong> • <b>WASD</b> Steer · <b>SHIFT</b> Dive · Land &amp; Open Chests <b>[E]</b>
+                ALTITUDE: <strong id="skydrop-alt">135m</strong>
               </span>
             </div>
             <div class="skydrop-bar-track">
@@ -929,23 +929,9 @@
           <div id="banner-toast" class="banner-toast hidden"></div>
         </div>
 
-        <!-- TOP RIGHT: Kill Feed & Compact Controls Legend -->
+        <!-- TOP RIGHT: Kill Feed -->
         <div class="hud-top-right">
           <div id="kill-feed" class="kill-feed"></div>
-          <div class="controls-mini">
-            <span><b>WASD</b> Move</span>
-            <span><b>SHIFT</b> Sprint/Dive</span>
-            <span><b>C/CTRL</b> Crouch/Slide</span>
-            <span><b>SPACE</b> Jump</span>
-            <span><b>LMB</b> Fire/Use</span>
-            <span><b>RMB</b> ADS/Scope</span>
-            <span><b>E</b> Open Chest/Loot</span>
-            <span><b>Q</b> Ultimate</span>
-            <span><b>R</b> Reload</span>
-            <span><b>1–5</b> Slots</span>
-            <span><b>M</b> Map</span>
-            <span><b>ESC</b> Pause</span>
-          </div>
         </div>
 
         <!-- CENTER COMBAT OVERLAYS -->
@@ -1024,7 +1010,7 @@
         <div class="hud-bottom-right">
           <div class="active-item-wrap">
             <div class="active-item-readout" id="active-item-readout">
-              <span id="active-item-name">Unarmed — Find &amp; Open Chests [E]</span>
+              <span id="active-item-name">Unarmed</span>
               <span id="active-item-ammo">NO WEAPON</span>
             </div>
             <div id="reload-bar-wrap" class="reload-bar-track hidden">
@@ -1101,36 +1087,36 @@
           <div class="placement-badge is-victory" id="go-placement">#1 / 20</div>
           <h2 id="go-title">Victory Royale!</h2>
           <p id="go-subtitle">You outlasted every rival at the Googleplex.</p>
-          <div class="summary-stats summary-stats-7">
-            <div class="sum-stat sum-span-4">
-              <span class="sum-label">Play Mode</span>
+          <ul class="summary-stats-list" aria-label="Match statistics">
+            <li class="sum-bullet-item">
+              <span class="sum-bullet-left"><span class="sum-label">Play Mode</span></span>
               <span class="sum-val" id="go-mode">Battle Royale</span>
-            </div>
-            <div class="sum-stat sum-span-4">
-              <span class="sum-label">Character</span>
+            </li>
+            <li class="sum-bullet-item">
+              <span class="sum-bullet-left"><span class="sum-label">Character</span></span>
               <span class="sum-val" id="go-hero">Gmail AI</span>
-            </div>
-            <div class="sum-stat sum-span-4">
-              <span class="sum-label">Bot Difficulty</span>
+            </li>
+            <li class="sum-bullet-item">
+              <span class="sum-bullet-left"><span class="sum-label">Bot Difficulty</span></span>
               <span class="sum-val" id="go-difficulty">Tactical (Staff)</span>
-            </div>
-            <div class="sum-stat sum-span-3">
-              <span class="sum-label">Eliminations</span>
+            </li>
+            <li class="sum-bullet-item">
+              <span class="sum-bullet-left"><span class="sum-label">Eliminations</span></span>
               <span class="sum-val" id="go-elims">0</span>
-            </div>
-            <div class="sum-stat sum-span-3">
-              <span class="sum-label">Headshots</span>
+            </li>
+            <li class="sum-bullet-item">
+              <span class="sum-bullet-left"><span class="sum-label">Headshots</span></span>
               <span class="sum-val sum-gold" id="go-headshots">0</span>
-            </div>
-            <div class="sum-stat sum-span-3">
-              <span class="sum-label">Damage Dealt</span>
+            </li>
+            <li class="sum-bullet-item">
+              <span class="sum-bullet-left"><span class="sum-label">Damage Dealt</span></span>
               <span class="sum-val" id="go-damage">0</span>
-            </div>
-            <div class="sum-stat sum-span-3">
-              <span class="sum-label">Survival Time</span>
+            </li>
+            <li class="sum-bullet-item">
+              <span class="sum-bullet-left"><span class="sum-label">Survival Time</span></span>
               <span class="sum-val" id="go-time">0:00</span>
-            </div>
-          </div>
+            </li>
+          </ul>
           <div class="modal-actions modal-actions-3">
             <button type="button" id="btn-play-again" class="btn-primary">Drop Again</button>
             <button type="button" id="btn-change-hero" class="btn-tonal">Change Character</button>
