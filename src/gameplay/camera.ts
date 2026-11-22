@@ -14,6 +14,8 @@ export interface CameraUpdateInput {
   pitch: number;
   crouching: boolean;
   sliding?: boolean;
+  ridingGBike?: boolean;
+  gbikeLean?: number;
   sprinting: boolean;
   isAds: boolean;
   sniperScope: boolean;
@@ -104,6 +106,8 @@ export class ThirdPersonCamera {
       pitch,
       crouching,
       sliding = false,
+      ridingGBike = false,
+      gbikeLean = 0,
       sprinting,
       isAds,
       sniperScope,
@@ -149,6 +153,12 @@ export class ThirdPersonCamera {
       targetBack = sprinting ? 5.6 : 6.4;
       targetRight = 0.0;
       targetUp = 1.45;
+    } else if (ridingGBike) {
+      // Dynamic panoramic GBike riding camera centered cleanly behind bike & rider
+      targetFov = sprinting ? 81 : 75;
+      targetBack = sprinting ? 4.95 : 4.55;
+      targetRight = 0.0;
+      targetUp = 0.56;
     } else if (sniperScope) {
       // Longbow .308 Sniper Scope ADS: razor-sharp 16° FOV at 0.85m backDist
       targetFov = 16;
@@ -174,11 +184,13 @@ export class ThirdPersonCamera {
     }
 
     const targetEye =
-      sliding && !isAds && !sniperScope
-        ? GAME_CONSTANTS.EYE_HEIGHT_SLIDING
-        : crouching
-          ? GAME_CONSTANTS.EYE_HEIGHT_CROUCHING
-          : GAME_CONSTANTS.EYE_HEIGHT_STANDING;
+      ridingGBike && !skyDropping
+        ? 1.48
+        : sliding && !isAds && !sniperScope
+          ? GAME_CONSTANTS.EYE_HEIGHT_SLIDING
+          : crouching
+            ? GAME_CONSTANTS.EYE_HEIGHT_CROUCHING
+            : GAME_CONSTANTS.EYE_HEIGHT_STANDING;
 
     // Fast, responsive zoom-in lerp (14/s for ground ADS, 18/s for Sniper Scope)
     const blendRate = sniperScope ? 18 : isAds ? 14 : 11;
@@ -189,7 +201,13 @@ export class ThirdPersonCamera {
     this.currentRightOffset += (targetRight - this.currentRightOffset) * blend;
     this.currentUpOffset += (targetUp - this.currentUpOffset) * blend;
 
-    const targetRoll = sliding && !isAds && !sniperScope && !skyDropping ? -0.026 : 0;
+    const safeBikeLean = Number.isFinite(gbikeLean) ? gbikeLean : 0;
+    let targetRoll = 0;
+    if (ridingGBike && !skyDropping) {
+      targetRoll = Math.max(-0.055, Math.min(0.055, safeBikeLean * 0.24));
+    } else if (sliding && !isAds && !sniperScope && !skyDropping) {
+      targetRoll = -0.026;
+    }
     this.currentRoll += (targetRoll - this.currentRoll) * Math.min(1, dt * 11);
 
     if (Math.abs(this.camera.fov - this.currentFov) > 0.01) {

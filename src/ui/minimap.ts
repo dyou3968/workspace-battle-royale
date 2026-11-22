@@ -1278,6 +1278,101 @@ export class TacticalMinimap {
       ctx.fill();
     }
 
+    // 3c. Rideable GBikes (Google Green circular pip + crisp white ring; handlebar/wheel glyph on Full Map)
+    if (state.gbikes && state.gbikes.length > 0) {
+      for (const bike of state.gbikes) {
+        if (bike.occupied) continue;
+        const bx = proj.wx(bike.x);
+        const by = proj.wz(bike.z);
+        const r = detailed ? 4.2 : 2.6;
+
+        ctx.save();
+        if (detailed) {
+          ctx.beginPath();
+          ctx.arc(bx, by, r + 1.4, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
+          ctx.fill();
+        }
+
+        ctx.beginPath();
+        ctx.arc(bx, by, r, 0, Math.PI * 2);
+        ctx.fillStyle = '#34A853';
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = detailed ? 1.35 : 0.9;
+        ctx.stroke();
+
+        if (detailed) {
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 0.85;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          // Tiny twin wheels
+          ctx.beginPath();
+          ctx.arc(bx - 1.55, by + 0.95, 0.9, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(bx + 1.55, by + 0.95, 0.9, 0, Math.PI * 2);
+          ctx.stroke();
+          // Tiny cruiser handlebar / frame glyph
+          ctx.beginPath();
+          ctx.moveTo(bx - 1.35, by + 0.7);
+          ctx.lineTo(bx - 0.1, by - 1.25);
+          ctx.lineTo(bx + 1.35, by - 1.25);
+          ctx.lineTo(bx + 1.45, by + 0.7);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
+
+    // 3d. TechStop Weapon Upgrade Centers (Google Blue diamond badge + white border + crisp upgrade bolt)
+    if (state.techStops && state.techStops.length > 0) {
+      for (const stop of state.techStops) {
+        const tx = proj.wx(stop.x);
+        const ty = proj.wz(stop.z);
+        const r = detailed ? 6.5 : 4.2;
+
+        ctx.save();
+        // Subtle dark contrast halo so white border pops over light campus roofs
+        ctx.beginPath();
+        ctx.moveTo(tx, ty - r - 1.3);
+        ctx.lineTo(tx + r + 1.3, ty);
+        ctx.lineTo(tx, ty + r + 1.3);
+        ctx.lineTo(tx - r - 1.3, ty);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.74)';
+        ctx.fill();
+
+        // Crisp Google Blue diamond badge with 1.4px white border
+        ctx.beginPath();
+        ctx.moveTo(tx, ty - r);
+        ctx.lineTo(tx + r, ty);
+        ctx.lineTo(tx, ty + r);
+        ctx.lineTo(tx - r, ty);
+        ctx.closePath();
+        ctx.fillStyle = '#1A73E8';
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = detailed ? 1.4 : 1.1;
+        ctx.stroke();
+
+        // Crisp vector lightning / upgrade bolt inside diamond
+        const s = r * 0.56;
+        ctx.beginPath();
+        ctx.moveTo(tx + 0.18 * s, ty - 1.0 * s);
+        ctx.lineTo(tx - 0.62 * s, ty + 0.08 * s);
+        ctx.lineTo(tx - 0.02 * s, ty + 0.08 * s);
+        ctx.lineTo(tx - 0.22 * s, ty + 1.0 * s);
+        ctx.lineTo(tx + 0.62 * s, ty - 0.08 * s);
+        ctx.lineTo(tx + 0.02 * s, ty - 0.08 * s);
+        ctx.closePath();
+        ctx.fillStyle = '#FEF08A';
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
     // 4. Golden Supply Drop Beacons / Triangles
     for (const drop of state.supplyDrops) {
       const dx = proj.wx(drop.x);

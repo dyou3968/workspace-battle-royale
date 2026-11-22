@@ -37,7 +37,12 @@ export type UtilityItemId =
   | 'hardlight_cover'
   | 'impulse_booster';
 
-export type PropAssetId = 'supply_drop' | 'glider' | 'loot_chest';
+export type PropAssetId =
+  | 'supply_drop'
+  | 'glider'
+  | 'loot_chest'
+  | 'gbike_rideable'
+  | 'techstop_kiosk';
 
 export type MapAssetKey =
   | 'terrain'
@@ -319,13 +324,15 @@ export interface ChannelState {
   progress: number; // 0..1
   remainingSec: number;
   totalSec: number;
-  kind?: 'consumable' | 'supply_drop' | 'chest';
+  kind?: 'consumable' | 'supply_drop' | 'chest' | 'techstop';
   chestTier?: ChestTier;
 }
 
 export interface StatusEffectsState {
   crouching: boolean;
   sliding: boolean;
+  ridingGBike?: boolean;
+  gbikeSpeedKmh?: number;
   silencedSec: number;
   hastedSec: number;
   slowedSec: number;
@@ -369,6 +376,7 @@ export interface GameSettings {
   mouseSensitivity: number;   // 0.4..2.2 (default 1.0)
   adsSensitivity: number;     // 0.4..2.0 (default 1.0)
   invertY: boolean;           // default false
+  visualSoundCompass?: boolean; // default true
 }
 
 export interface PerfStats {
@@ -389,6 +397,16 @@ export interface SupplyDropBearing {
   dist: number;
   landed: boolean;
   opened: boolean;
+}
+
+export type SoundCueKind = 'footstep' | 'gunfire' | 'chest' | 'gbike' | 'supply_drop';
+
+export interface SoundCompassCue {
+  kind: SoundCueKind;
+  /** Relative bearing in radians from player forward: 0 = ahead, +PI/2 = right, -PI/2 = left, ±PI = behind */
+  bearingRad: number;
+  /** Normalized prominence 0..1 */
+  intensity: number;
 }
 
 export interface HudSnapshot {
@@ -431,6 +449,7 @@ export interface HudSnapshot {
   channel: ChannelState;
   status: StatusEffectsState;
   supplyDropBearings: SupplyDropBearing[];
+  soundCues?: SoundCompassCue[];
   waypointBearingRad?: number | null;
   waypointDist?: number | null;
   pointerLocked: boolean;
@@ -464,6 +483,18 @@ export interface MinimapSupplyDrop {
   opened: boolean;
 }
 
+export interface MinimapGBike {
+  x: number;
+  z: number;
+  occupied: boolean;
+}
+
+export interface MinimapTechStop {
+  x: number;
+  z: number;
+  name: string;
+}
+
 export interface MinimapState {
   playerX: number;
   playerZ: number;
@@ -478,6 +509,8 @@ export interface MinimapState {
   loot: MinimapLootPip[];
   chests: MinimapChestPip[];
   supplyDrops: MinimapSupplyDrop[];
+  gbikes?: MinimapGBike[];
+  techStops?: MinimapTechStop[];
   landmarks: LandmarkInfo[];
   revealedAll: boolean;
   waypoint?: MapWaypoint | null;

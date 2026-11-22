@@ -35,6 +35,8 @@ import {
   MinimapState,
   ProductHeroId,
   QualityPreset,
+  SoundCompassCue,
+  SoundCueKind,
   UtilityItemId,
   WeaponId,
 } from './types';
@@ -205,6 +207,7 @@ const settingMasterVolume = document.getElementById('setting-master-volume') as 
 const valMasterVolume = document.getElementById('val-master-volume')!;
 const btnTestAudio = document.getElementById('btn-test-audio') as HTMLButtonElement;
 const settingMuted = document.getElementById('setting-muted') as HTMLInputElement;
+const settingVisualSoundCompass = document.getElementById('setting-visual-sound-compass') as HTMLInputElement;
 const btnSettingsReset = document.getElementById('btn-settings-reset') as HTMLButtonElement;
 const settingsSavedNote = document.getElementById('settings-saved-note')!;
 const btnSettingsDone = document.getElementById('btn-settings-done') as HTMLButtonElement;
@@ -213,6 +216,7 @@ const btnSettingsDone = document.getElementById('btn-settings-done') as HTMLButt
 const sniperScopeOverlay = document.getElementById('sniper-scope-overlay')!;
 const stormVignette = document.getElementById('storm-vignette')!;
 const lowHpVignette = document.getElementById('low-hp-vignette')!;
+const shieldShatterVignette = document.getElementById('shield-shatter-vignette')!;
 const zoneNameEl = document.getElementById('zone-name')!;
 const stormPill = document.getElementById('storm-pill')!;
 const stormPhaseBadge = document.getElementById('storm-phase-badge')!;
@@ -232,10 +236,13 @@ const skydropBar = document.getElementById('skydrop-bar')!;
 const bannerToast = document.getElementById('banner-toast')!;
 const killFeedEl = document.getElementById('kill-feed')!;
 
+const soundCompassRing = document.getElementById('sound-compass-ring')!;
+const soundCompassSvg = document.getElementById('sound-compass-svg') as unknown as SVGSVGElement;
 const damageArcLayer = document.getElementById('damage-arc-layer')!;
 const crosshairEl = document.getElementById('crosshair')!;
 const hitmarkerEl = document.getElementById('hitmarker')!;
 const critFlashEl = document.getElementById('crit-flash')!;
+const shieldBreakFlashEl = document.getElementById('shield-break-flash')!;
 const channelRing = document.getElementById('channel-ring')!;
 const channelArc = document.getElementById('channel-arc') as unknown as SVGCircleElement;
 const channelTime = document.getElementById('channel-time')!;
@@ -313,6 +320,10 @@ function loadSettings(): GameSettings {
         DEFAULT_GAME_SETTINGS.adsSensitivity
       ),
       invertY: typeof parsed.invertY === 'boolean' ? parsed.invertY : DEFAULT_GAME_SETTINGS.invertY,
+      visualSoundCompass:
+        typeof parsed.visualSoundCompass === 'boolean'
+          ? parsed.visualSoundCompass
+          : (DEFAULT_GAME_SETTINGS.visualSoundCompass ?? true),
     };
   } catch {
     return { ...DEFAULT_GAME_SETTINGS };
@@ -346,11 +357,14 @@ let currentMatchPhase: HudSnapshot['matchPhase'] = 'lobby';
 let bannerTimer: number | undefined;
 let hitmarkerTimer: number | undefined;
 let critFlashTimer: number | undefined;
+let shieldBreakFlashTimer: number | undefined;
+let shieldShatterTimer: number | undefined;
 let savedNoteTimer: number | undefined;
 let testSoundTimer: number | undefined;
 let lastHotbarSig = '';
 let lastStatusSig = '';
 let lastPerfSig = '';
+let lastSoundCompassSig = '';
 let lastMinimapRenderMs = 0;
 let lastFullMapRenderMs = 0;
 let lastPerfUpdateMs = 0;
@@ -1048,13 +1062,14 @@ function syncSettingsUi(): void {
   setTextCached(valAdsSens, `${currentSettings.adsSensitivity.toFixed(2)}×`);
   settingInvertY.checked = currentSettings.invertY;
 
-  // Audio: Master Volume & Mute
+  // Audio: Master Volume, Mute & Visual Sound Compass
   const volPct = Math.round(currentSettings.masterVolume * 100);
   settingMasterVolume.value = String(volPct);
   setSliderFill(settingMasterVolume, volPct, 0, 100);
   setTextCached(valMasterVolume, currentSettings.muted ? 'Muted' : `${volPct}%`);
   settingVolumeRow.classList.toggle('is-muted', currentSettings.muted);
   settingMuted.checked = currentSettings.muted;
+  settingVisualSoundCompass.checked = currentSettings.visualSoundCompass ?? true;
 
   // Splash Screen Quick Mute Button Sync
   btnSplashMute.classList.toggle('is-muted', currentSettings.muted);
@@ -1090,6 +1105,13 @@ function applyAndSaveSettings(patch: Partial<GameSettings>, savedMessage = 'Save
   engine.applySettings(currentSettings);
   syncSettingsUi();
   syncPerfHudVisibility();
+  if (!(currentSettings.visualSoundCompass ?? true)) {
+    soundCompassRing.classList.add('hidden');
+    if (lastSoundCompassSig !== '') {
+      lastSoundCompassSig = '';
+      soundCompassSvg.innerHTML = '';
+    }
+  }
   flashSavedNote(savedMessage);
 }
 
@@ -1165,6 +1187,10 @@ function bindSettingsControls(): void {
 
   settingMuted.addEventListener('change', () => {
     applyAndSaveSettings({ muted: settingMuted.checked });
+  });
+
+  settingVisualSoundCompass.addEventListener('change', () => {
+    applyAndSaveSettings({ visualSoundCompass: settingVisualSoundCompass.checked });
   });
 
   btnSettingsReset.addEventListener('click', () => {
@@ -1328,8 +1354,141 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
+const SOUND_COMPASS_ARC_RADIUS = 86;
+const SOUND_COMPASS_ICON_RADIUS = 72;
+
+const SOUND_COMPASS_PRIORITY: Record<SoundCueKind, number> = {
+  chest: 0,
+  gbike: 1,
+  supply_drop: 2,
+  footstep: 3,
+  gunfire: 4,
+};
+
+const SOUND_COMPASS_ICONS: Record<SoundCueKind, string> = {
+  footstep:
+    '<ellipse cx="-2.1" cy="-1.1" rx="1.45" ry="2.45" fill="currentColor"/><circle cx="-2.1" cy="2.45" r="1.1" fill="currentColor"/><ellipse cx="2.1" cy="-2.2" rx="1.45" ry="2.45" fill="currentColor"/><circle cx="2.1" cy="1.35" r="1.1" fill="currentColor"/>',
+  gunfire:
+    '<path d="M0,-5.1 L1.35,-1.45 L5.1,0 L1.35,1.45 L0,5.1 L-1.35,1.45 L-5.1,0 L-1.35,-1.45 Z" fill="currentColor"/><circle cx="0" cy="0" r="1.35" fill="#FFF7ED"/>',
+  chest:
+    '<polygon points="0,-4.9 4.7,0 0,4.9 -4.7,0" fill="currentColor" stroke="#FEF08A" stroke-width="0.9"/><rect x="-1.2" y="-1.2" width="2.4" height="2.4" rx="0.4" fill="#422006"/>',
+  supply_drop:
+    '<path d="M-4.1,-1.4 A4.3,4.3 0 0 1 4.1,-1.4 Z" fill="currentColor"/><rect x="-2.3" y="1" width="4.6" height="3.4" rx="0.6" fill="#FDE68A" stroke="currentColor" stroke-width="0.8"/><path d="M-2.9,-1.1 L-1.3,1 M2.9,-1.1 L1.3,1" stroke="#FEF3C7" stroke-width="0.8"/>',
+  gbike:
+    '<circle cx="-2.9" cy="1.9" r="1.95" fill="none" stroke="currentColor" stroke-width="1.25"/><circle cx="2.9" cy="1.9" r="1.95" fill="none" stroke="currentColor" stroke-width="1.25"/><path d="M-2.8,1.7 L-0.3,-1.6 L2.3,-1.6 L2.8,1.7 M-0.3,-1.6 L0.2,1.9 L-2.8,1.9" fill="none" stroke="#BBF7D0" stroke-width="1.0" stroke-linecap="round" stroke-linejoin="round"/>',
+};
+
+function clearSoundCompass(): void {
+  soundCompassRing.classList.add('hidden');
+  if (lastSoundCompassSig !== '') {
+    lastSoundCompassSig = '';
+    soundCompassSvg.innerHTML = '';
+  }
+}
+
+function resetCombatFeedbackUi(): void {
+  clearTimeout(hitmarkerTimer);
+  clearTimeout(critFlashTimer);
+  clearTimeout(shieldBreakFlashTimer);
+  clearTimeout(shieldShatterTimer);
+  hitmarkerEl.classList.remove('show', 'crit', 'shield-break');
+  critFlashEl.classList.remove('show');
+  shieldBreakFlashEl.classList.remove('show');
+  shieldShatterVignette.classList.remove('active');
+  clearSoundCompass();
+}
+
+function renderSoundCompass(state: HudSnapshot): void {
+  const cues = state.soundCues;
+  if (
+    !(currentSettings.visualSoundCompass ?? true) ||
+    state.sniperScope ||
+    isFullMapOpen ||
+    state.matchPhase !== 'playing' ||
+    !cues ||
+    cues.length === 0
+  ) {
+    clearSoundCompass();
+    return;
+  }
+
+  const valid: SoundCompassCue[] = [];
+  for (let i = 0; i < cues.length; i++) {
+    const cue = cues[i];
+    if (
+      cue &&
+      Number.isFinite(cue.bearingRad) &&
+      Number.isFinite(cue.intensity) &&
+      cue.intensity > 0.01 &&
+      SOUND_COMPASS_ICONS[cue.kind]
+    ) {
+      valid.push(cue);
+    }
+  }
+
+  if (valid.length === 0) {
+    clearSoundCompass();
+    return;
+  }
+
+  // Paint higher-priority / stronger cues on top
+  valid.sort(
+    (a, b) =>
+      SOUND_COMPASS_PRIORITY[a.kind] - SOUND_COMPASS_PRIORITY[b.kind] || a.intensity - b.intensity
+  );
+
+  let sig = '';
+  for (let i = 0; i < valid.length; i++) {
+    const c = valid[i];
+    if (i > 0) sig += '|';
+    sig += `${c.kind}:${Math.round(c.bearingRad * 60)}:${Math.round(c.intensity * 25)}`;
+  }
+
+  soundCompassRing.classList.remove('hidden');
+  if (sig === lastSoundCompassSig) return;
+  lastSoundCompassSig = sig;
+
+  let markup = '';
+  for (let i = 0; i < valid.length; i++) {
+    const c = valid[i];
+    const intensity = Math.max(0, Math.min(1, c.intensity));
+    const opacity = (0.28 + 0.68 * intensity).toFixed(2);
+    // Arc span 24°..34° centered around bearingRad (0 = top / 12 o'clock, +PI/2 = right / 3 o'clock)
+    const halfSpanRad = ((12 + intensity * 5) * Math.PI) / 180;
+    const a1 = c.bearingRad - halfSpanRad;
+    const a2 = c.bearingRad + halfSpanRad;
+    const x1 = (Math.sin(a1) * SOUND_COMPASS_ARC_RADIUS).toFixed(2);
+    const y1 = (-Math.cos(a1) * SOUND_COMPASS_ARC_RADIUS).toFixed(2);
+    const x2 = (Math.sin(a2) * SOUND_COMPASS_ARC_RADIUS).toFixed(2);
+    const y2 = (-Math.cos(a2) * SOUND_COMPASS_ARC_RADIUS).toFixed(2);
+    const strokeW = (4.8 + intensity * 2.2).toFixed(2);
+    const outlineW = (7.2 + intensity * 2.2).toFixed(2);
+    const ix = (Math.sin(c.bearingRad) * SOUND_COMPASS_ICON_RADIUS).toFixed(2);
+    const iy = (-Math.cos(c.bearingRad) * SOUND_COMPASS_ICON_RADIUS).toFixed(2);
+    const arcD = `M ${x1} ${y1} A ${SOUND_COMPASS_ARC_RADIUS} ${SOUND_COMPASS_ARC_RADIUS} 0 0 1 ${x2} ${y2}`;
+
+    markup +=
+      `<g class="sc-cue sc-cue-${c.kind}" opacity="${opacity}">` +
+      `<path class="sc-arc-outline" d="${arcD}" stroke-width="${outlineW}"/>` +
+      `<path class="sc-arc-fill" d="${arcD}" stroke-width="${strokeW}"/>` +
+      `<g transform="translate(${ix} ${iy})">` +
+      `<circle class="sc-icon-bg" cx="0" cy="0" r="7.4"/>` +
+      `${SOUND_COMPASS_ICONS[c.kind]}` +
+      `</g>` +
+      `</g>`;
+  }
+
+  soundCompassSvg.innerHTML = markup;
+}
+
 function renderStatusBadges(state: HudSnapshot): void {
   const badges: { cls: string; text: string }[] = [];
+  if (state.status.ridingGBike) {
+    badges.push({
+      cls: 'gbike',
+      text: `GBIKE • ${Math.max(0, Math.round(state.status.gbikeSpeedKmh ?? 0))} KM/H`,
+    });
+  }
   if (state.status.sliding) {
     badges.push({ cls: 'slide', text: 'SLIDING • -45% SPREAD' });
   } else if (state.status.crouching) {
@@ -1514,7 +1673,10 @@ function renderHud(state: HudSnapshot): void {
     crosshairEl.style.setProperty('--ch-gap', dynamicGap);
   }
 
-  // Circular Consumable / Chest / Supply Drop Channeling Progress Ring
+  // Fortnite-Style Visual Sound Compass Ring around Crosshair
+  renderSoundCompass(state);
+
+  // Circular Consumable / Chest / Supply Drop / TechStop Channeling Progress Ring
   if (state.channel.active) {
     channelRing.classList.remove('hidden');
     const prog = Math.max(0, Math.min(1, state.channel.progress));
@@ -1529,6 +1691,7 @@ function renderHud(state: HudSnapshot): void {
     channelRing.classList.toggle('chest-t1', state.channel.kind === 'chest' && state.channel.chestTier === 1);
     channelRing.classList.toggle('chest-t2', state.channel.kind === 'chest' && state.channel.chestTier === 2);
     channelRing.classList.toggle('chest-t3', state.channel.kind === 'chest' && state.channel.chestTier === 3);
+    channelRing.classList.toggle('techstop', state.channel.kind === 'techstop');
     channelRing.classList.toggle('health', lower.includes('medkit'));
     channelRing.classList.toggle('mana', lower.includes('mana'));
   } else {
@@ -1544,6 +1707,8 @@ function renderHud(state: HudSnapshot): void {
     interactPrompt.classList.toggle('chest-t1', pLower.includes('tier 1'));
     interactPrompt.classList.toggle('chest-t2', pLower.includes('tier 2'));
     interactPrompt.classList.toggle('chest-t3', pLower.includes('tier 3'));
+    interactPrompt.classList.toggle('techstop', pLower.includes('techstop'));
+    interactPrompt.classList.toggle('gbike', pLower.includes('gbike'));
   } else {
     interactPrompt.classList.add('hidden');
   }
@@ -1665,16 +1830,20 @@ function renderHud(state: HudSnapshot): void {
 }
 
 // ==================== ENGINE INITIALIZATION ====================
-const hudCallbacks: HudCallbacks = {
+const hudCallbacks: Omit<HudCallbacks, 'onHitMarker'> & {
+  onHitMarker: (isHeadshot: boolean, isKill: boolean, shieldBroken?: boolean) => void;
+  onPlayerShieldBreak?: () => void;
+} = {
   onHudUpdate: renderHud,
   onKillFeed: pushKillFeed,
-  onHitMarker: (isHeadshot, isKill) => {
+  onHitMarker: (isHeadshot: boolean, isKill: boolean, shieldBroken: boolean = false) => {
     hitmarkerEl.classList.add('show');
     hitmarkerEl.classList.toggle('crit', isHeadshot);
+    hitmarkerEl.classList.toggle('shield-break', shieldBroken);
     clearTimeout(hitmarkerTimer);
     hitmarkerTimer = window.setTimeout(() => {
-      hitmarkerEl.classList.remove('show', 'crit');
-    }, isHeadshot ? 190 : 120);
+      hitmarkerEl.classList.remove('show', 'crit', 'shield-break');
+    }, shieldBroken ? 260 : isHeadshot ? 190 : 120);
 
     if (isHeadshot || isKill) {
       critFlashEl.textContent = isHeadshot && isKill ? 'HEADSHOT ELIM!' : isHeadshot ? 'HEADSHOT' : 'ELIMINATED';
@@ -1682,6 +1851,23 @@ const hudCallbacks: HudCallbacks = {
       clearTimeout(critFlashTimer);
       critFlashTimer = window.setTimeout(() => critFlashEl.classList.remove('show'), 460);
     }
+
+    if (shieldBroken) {
+      shieldBreakFlashEl.classList.add('show');
+      clearTimeout(shieldBreakFlashTimer);
+      shieldBreakFlashTimer = window.setTimeout(() => {
+        shieldBreakFlashEl.classList.remove('show');
+      }, 680);
+    }
+  },
+  onPlayerShieldBreak: () => {
+    shieldShatterVignette.classList.remove('active');
+    void shieldShatterVignette.offsetWidth;
+    shieldShatterVignette.classList.add('active');
+    clearTimeout(shieldShatterTimer);
+    shieldShatterTimer = window.setTimeout(() => {
+      shieldShatterVignette.classList.remove('active');
+    }, 440);
   },
   onFloatingDamage: spawnFloatingDamage,
   onDirectionalDamage: spawnDirectionalDamageArc,
@@ -1708,6 +1894,7 @@ const hudCallbacks: HudCallbacks = {
     lobbyOverlay.classList.add('hidden');
     pauseOverlay.classList.add('hidden');
     sniperScopeOverlay.classList.add('hidden');
+    resetCombatFeedbackUi();
     gameoverOverlay.classList.remove('hidden');
 
     const mode = GAME_MODES[summary.gameMode] ?? GAME_MODES.battle_royale;
@@ -1937,7 +2124,7 @@ engine
     assetPreloadBar.classList.add('ready');
     preloadPct.textContent = '100%';
     preloadFill.style.width = '100%';
-    const totalCount = lastPreloadTotal || 50;
+    const totalCount = lastPreloadTotal || 52;
     preloadLabel.textContent = `All ${totalCount} 3D Mountain View campus assets loaded`;
     assetStatusChip.classList.add('ready');
     assetChipText.textContent = `Ready · ${totalCount} assets`;
@@ -2003,6 +2190,7 @@ function launchMatch(): void {
   hudEl.classList.remove('hidden');
   killFeedEl.innerHTML = '';
   damageArcLayer.innerHTML = '';
+  resetCombatFeedbackUi();
   lastHotbarSig = '';
   lastStatusSig = '';
   lastPerfSig = '';
@@ -2031,6 +2219,7 @@ function returnToLobby(targetPage: MenuPage = 'home'): void {
   pauseOverlay.classList.add('hidden');
   gameoverOverlay.classList.add('hidden');
   sniperScopeOverlay.classList.add('hidden');
+  resetCombatFeedbackUi();
   lobbyOverlay.classList.remove('hidden');
   lobbyOverlay.classList.add('active');
   navigateMenu(targetPage);

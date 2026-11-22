@@ -62,6 +62,19 @@ export const GAME_CONSTANTS = {
   SUPPLY_DROP_CHANNEL_TIME: 1.5,
   TOTAL_COMBATANTS: 20, // 1 player + 19 AI bots
 
+  GBIKE_MAX_SPEED: 15.6,
+  GBIKE_BOOST_SPEED: 19.4,
+  GBIKE_REVERSE_SPEED: 4.4,
+  GBIKE_MOUNT_RADIUS: 3.4,
+  GBIKE_BAIL_SLIDE_MIN_SPEED: 8.5,
+  GBIKE_HOP_IMPULSE: 8.2,
+
+  TECHSTOP_INTERACT_RADIUS: 3.4,
+  TECHSTOP_RARE_MANA_COST: 45,
+  TECHSTOP_EPIC_MANA_COST: 75,
+  TECHSTOP_RARE_CHANNEL_TIME: 1.2,
+  TECHSTOP_EPIC_CHANNEL_TIME: 1.5,
+
   ARENA_MIN_X: -300,
   ARENA_MAX_X: 300,
   ARENA_MIN_Z: -190,
@@ -541,6 +554,7 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
   mouseSensitivity: 1.0,
   adsSensitivity: 1.0,
   invertY: false,
+  visualSoundCompass: true,
 };
 
 export const GAME_MODES: Record<GameModeId, GameModeDef> = {

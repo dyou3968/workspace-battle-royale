@@ -2,8 +2,26 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GAME_CONSTANTS } from '../data/catalog';
 import { BoxCollider, GliderDropPoint, LandmarkInfo, LootSpot, MapAssetKey, SupplyDropSpot } from '../types';
-import { AssetManager } from '../core/assetManager';
+import { AssetManager, TechStopVisual } from '../core/assetManager';
 import { PhysicsWorld, PolygonDoorwaySpec } from '../core/physics';
+
+export interface TechStopPlacement {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  z: number;
+  rotY: number;
+  visual?: TechStopVisual;
+}
+
+export interface GBikeSpawnPlacement {
+  x: number;
+  y: number;
+  z: number;
+  rotY: number;
+  variant: number;
+}
 
 // Exact Three.js XZ polygons matching scripts/blender/build_map.py (SVG -> local -> §10.2 centers)
 const B40_POLY: [number, number][] = [
@@ -67,6 +85,8 @@ export class GoogleplexWorld {
   public readonly lootSpots: LootSpot[] = [];
   public readonly gliderDropPoints: GliderDropPoint[] = [];
   public readonly supplyDropSpots: SupplyDropSpot[] = [];
+  public readonly techStops: TechStopPlacement[] = [];
+  public readonly gbikeSpawns: GBikeSpawnPlacement[] = [];
 
   private sunLight!: THREE.DirectionalLight;
   private activeIndoorLight!: THREE.PointLight;
@@ -100,6 +120,7 @@ export class GoogleplexWorld {
     this.placeInstancedCampusProps();
     this.placeParkDefensesAndGardens();
     this.placeOfficeInteriors();
+    this.placeTechStopCenters();
     this.buildLandmarksMetadata();
     this.buildLootAndDropPoints();
 
@@ -1385,6 +1406,58 @@ export class GoogleplexWorld {
       });
     }
 
+    // 2b. 18 Rideable Google GBike Spawn Points:
+    //     15 derived directly from the 15 GBike Corrals (offset 2.6m along each rack's verified clear plaza side)
+    //     + 3 prominent bikes at Stan Plaza, Gradient Canopy Entrance, and Charleston Park.
+    this.gbikeSpawns.length = 0;
+    const rackClearSides: readonly (-1 | 1)[] = [
+      -1, // B41 north plaza (clear of B41 wall)
+      -1, // B42 west plaza / Permanente Creek Trail
+      -1, // B40 east / Charleston Park west entry
+      1,  // B43 SE parking plaza (clear of Charleston Rd)
+      1,  // Joaquin Rd -> Gradient Canopy West Patio
+      1,  // B43 south Charleston Rd plaza
+      1,  // Visitor Experience south plaza (clear of umbrella)
+      1,  // Shoreline Amphitheatre south arrival plaza
+      1,  // Google Athletic Field east plaza
+      -1, // Google 2000/1950 Creek Bridge Plaza
+      1,  // Alta East / Charleston open courtyard
+      -1, // Charleston Campus north arrival plaza
+      1,  // Google 2015 / Stierlin Ct plaza
+      1,  // Google CL2 Crittenden plaza
+      1,  // Google 1395 Charleston plaza
+    ];
+    for (let i = 0; i < gbikes.length; i++) {
+      const g = gbikes[i];
+      const side = rackClearSides[i] ?? 1;
+      const bx = Number((g.x + side * 2.6 * Math.sin(g.rotY)).toFixed(2));
+      const bz = Number((g.z + side * 2.6 * Math.cos(g.rotY)).toFixed(2));
+      const by = this.physics.getTerrainHeight(bx, bz);
+      // Rideable GBike faces -Z at rotY=0; face outward along the rack's clear plaza side
+      const bikeYaw = side < 0 ? g.rotY : g.rotY + Math.PI;
+      this.gbikeSpawns.push({
+        x: bx,
+        y: by,
+        z: bz,
+        rotY: bikeYaw,
+        variant: i % 4,
+      });
+    }
+    const prominentBikes: { x: number; z: number; rotY: number; variant: number }[] = [
+      { x: -45.2, z: 8.2, rotY: 0.55, variant: 0 },             // Stan the T-Rex Plaza (Google Blue + Yellow)
+      { x: 106.0, z: -44.0, rotY: Math.PI + 0.35, variant: 1 }, // Gradient Canopy North Entrance (Google Red + Blue)
+      { x: 22.0, z: 6.0, rotY: -0.45, variant: 2 },             // Charleston Park Central Path (Google Green + Yellow)
+    ];
+    for (const pb of prominentBikes) {
+      this.gbikeSpawns.push({
+        x: pb.x,
+        y: this.physics.getTerrainHeight(pb.x, pb.z),
+        z: pb.z,
+        rotY: pb.rotY,
+        variant: pb.variant,
+      });
+    }
+
     // 3. Lush California Live Oak Groves (Charleston Park + North Shoreline + Perimeter)
     const oaks: InstancePlacement[] = [
       // Charleston Park core groves (+10..+52, -52..+50 — framing Art Garden, Outdoor Gym & Pergola!)
@@ -2016,6 +2089,48 @@ export class GoogleplexWorld {
     }
   }
 
+  /**
+   * Places the 6 strategic Google TechStop Weapon Upgrade Centers (`prop_techstop_kiosk.glb`,
+   * 2.52m W × 2.45m H × 1.12m D) at verified clear, flat open plazas across the 3× Googleplex
+   * with zero doorway/chest/supply-drop obstruction and exact solid counter colliders.
+   */
+  private placeTechStopCenters(): void {
+    this.techStops.length = 0;
+
+    const specs: { id: string; name: string; x: number; z: number; rotY: number }[] = [
+      { id: 'techstop_b40', name: 'B40 Partnerplex TechStop', x: -63, z: -5.5, rotY: Math.PI },
+      { id: 'techstop_b43', name: 'B43 Quad TechStop', x: -35, z: 14, rotY: 0.35 },
+      { id: 'techstop_gradient_canopy', name: 'Gradient Canopy TechStop', x: 126, z: -45, rotY: Math.PI - 0.35 },
+      { id: 'techstop_charleston', name: 'Charleston Campus TechStop', x: 2, z: 134, rotY: -Math.PI / 2 },
+      { id: 'techstop_alta', name: 'Alta Complex TechStop', x: -97, z: 141, rotY: 0 },
+      { id: 'techstop_shoreline_east', name: 'Shoreline East TechStop', x: 195, z: -37, rotY: Math.PI / 2 },
+    ];
+
+    for (const spec of specs) {
+      const gy = this.physics.getSupportHeight(spec.x, spec.z, 20, 0.5, 0.5);
+      const visual = this.assets.instantiateTechStop();
+      visual.root.name = `TechStop_${spec.id}`;
+      visual.root.position.set(spec.x, gy, spec.z);
+      visual.root.rotation.y = spec.rotY;
+      this.worldGroup.add(visual.root);
+
+      this.physics.addCenteredBox(spec.x, gy + 0.55, spec.z, 2.52, 1.1, 1.12, {
+        rotationY: spec.rotY,
+        tag: 'techstop_kiosk',
+      });
+
+      this.techStops.push({
+        id: spec.id,
+        name: spec.name,
+        x: spec.x,
+        y: gy,
+        z: spec.z,
+        rotY: spec.rotY,
+        visual,
+      });
+    }
+  }
+
   private placeInstancedGroup(assetKey: MapAssetKey, placements: InstancePlacement[]): void {
     this.instantiateBatch(assetKey, placements);
   }
@@ -2431,6 +2546,12 @@ export class GoogleplexWorld {
       this.sunLight.target,
       this.activeIndoorLight,
     ]);
+    // Keep the 6 TechStop kiosk roots unfrozen so their floating TechStop_HoloIcon animates live at 60 FPS
+    for (const ts of this.techStops) {
+      if (ts.visual?.root) {
+        dynamicRoots.add(ts.visual.root);
+      }
+    }
 
     // Keep worldGroup.matrixWorldAutoUpdate = true so dynamic children still update automatically
     this.worldGroup.matrixAutoUpdate = false;

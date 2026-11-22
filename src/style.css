@@ -2989,6 +2989,50 @@ input:focus-visible {
   animation: pulseStorm 0.9s ease-in-out infinite;
 }
 
+.shield-shatter-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(ellipse at center, transparent 54%, rgba(56, 189, 248, 0.24) 84%, rgba(14, 165, 233, 0.54) 100%),
+    repeating-conic-gradient(
+      from 12deg at 50% 50%,
+      transparent 0deg 14deg,
+      rgba(186, 230, 253, 0.18) 14.5deg 15.2deg,
+      transparent 15.7deg 30deg
+    );
+  -webkit-mask-image: radial-gradient(ellipse at center, transparent 56%, black 90%);
+  mask-image: radial-gradient(ellipse at center, transparent 56%, black 90%);
+  box-shadow:
+    inset 0 0 96px 26px rgba(56, 189, 248, 0.78),
+    inset 0 0 28px 6px rgba(224, 242, 254, 0.68);
+}
+
+.shield-shatter-vignette.active {
+  animation: shieldShatterPulse 0.42s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes shieldShatterPulse {
+  0% {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+  16% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  48% {
+    opacity: 0.74;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.01);
+  }
+}
+
 @keyframes pulseStorm {
   0%, 100% { opacity: 0.55; }
   50% { opacity: 1; }
@@ -3426,6 +3470,91 @@ input:focus-visible {
 }
 
 /* ==================== CENTER COMBAT INDICATORS ==================== */
+.sound-compass-ring {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 220px;
+  height: 220px;
+  pointer-events: none;
+  z-index: 6;
+  filter: drop-shadow(0 1px 4px rgba(2, 6, 23, 0.86)) drop-shadow(0 0 1px rgba(2, 6, 23, 0.95));
+}
+
+.sound-compass-ring svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.sc-arc-outline {
+  fill: none;
+  stroke: rgba(8, 13, 24, 0.68);
+  stroke-linecap: round;
+}
+
+.sc-arc-fill {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.sc-icon-bg {
+  fill: rgba(10, 15, 28, 0.76);
+  stroke-width: 1.1;
+}
+
+.sc-cue-footstep {
+  color: #F8FAFC;
+}
+.sc-cue-footstep .sc-arc-fill {
+  stroke: #F8FAFC;
+}
+.sc-cue-footstep .sc-icon-bg {
+  stroke: rgba(203, 213, 225, 0.75);
+}
+
+.sc-cue-gunfire {
+  color: #FF6B35;
+}
+.sc-cue-gunfire .sc-arc-fill {
+  stroke: #F97316;
+}
+.sc-cue-gunfire .sc-icon-bg {
+  stroke: rgba(255, 107, 53, 0.88);
+}
+
+.sc-cue-chest {
+  color: #FBBC04;
+}
+.sc-cue-chest .sc-arc-fill {
+  stroke: #FBBC04;
+}
+.sc-cue-chest .sc-icon-bg {
+  stroke: rgba(251, 188, 4, 0.88);
+}
+
+.sc-cue-supply_drop {
+  color: #F59E0B;
+}
+.sc-cue-supply_drop .sc-arc-fill {
+  stroke: #F59E0B;
+}
+.sc-cue-supply_drop .sc-icon-bg {
+  stroke: rgba(251, 191, 36, 0.88);
+}
+
+.sc-cue-gbike {
+  color: #34A853;
+}
+.sc-cue-gbike .sc-arc-fill {
+  stroke: #34A853;
+}
+.sc-cue-gbike .sc-icon-bg {
+  stroke: rgba(74, 222, 128, 0.85);
+}
+
 .damage-arc-layer {
   position: absolute;
   top: 50%;
@@ -3537,6 +3666,25 @@ input:focus-visible {
   box-shadow: 0 0 10px #F59E0B, 0 0 3px #FFFFFF;
 }
 
+.hitmarker.shield-break {
+  transform: scale(1.52);
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.95));
+}
+
+.hitmarker.shield-break::before,
+.hitmarker.shield-break::after {
+  width: 30px;
+  height: 3.4px;
+  background: #38BDF8;
+  box-shadow: 0 0 12px #38BDF8, 0 0 4px #E0F2FE;
+}
+
+.hitmarker.crit.shield-break::before,
+.hitmarker.crit.shield-break::after {
+  background: linear-gradient(90deg, #38BDF8 0%, #E0F2FE 50%, #FBBC04 100%);
+  box-shadow: 0 0 14px #38BDF8, 0 0 8px #F59E0B;
+}
+
 .crit-flash {
   position: absolute;
   top: -22px;
@@ -3555,6 +3703,32 @@ input:focus-visible {
 
 .crit-flash.show {
   opacity: 1;
+}
+
+.shield-break-flash {
+  position: absolute;
+  bottom: -24px;
+  left: 50%;
+  transform: translateX(-50%) scale(0.92);
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  color: #7DD3FC;
+  text-shadow:
+    0 0 10px rgba(56, 189, 248, 0.92),
+    0 1px 2px rgba(2, 6, 23, 0.98),
+    0 0 3px rgba(2, 6, 23, 0.98),
+    0 2px 8px rgba(0, 0, 0, 0.95);
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  transition: opacity 0.1s ease, transform 0.14s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+
+.shield-break-flash.show {
+  opacity: 1;
+  transform: translateX(-50%) scale(1.04);
 }
 
 /* CIRCULAR CONSUMABLE / SUPPLY DROP CHANNELING RING */
@@ -3601,6 +3775,32 @@ input:focus-visible {
 .channel-ring.chest-t3 .channel-label { border-color: rgba(192, 132, 252, 0.65); color: #F3E8FF; }
 .channel-ring.health .channel-arc { stroke: var(--g-green); }
 .channel-ring.mana .channel-arc { stroke: #C084FC; }
+.channel-ring.techstop .channel-arc {
+  stroke: #4285F4;
+  filter: drop-shadow(0 0 6px rgba(66, 133, 244, 0.8));
+  animation: techstopArcShimmer 0.95s ease-in-out infinite alternate;
+}
+.channel-ring.techstop .channel-label {
+  border-color: rgba(66, 133, 244, 0.8);
+  background: linear-gradient(135deg, rgba(15, 29, 64, 0.92), rgba(45, 22, 76, 0.92));
+  color: #E8F0FE;
+  box-shadow: 0 0 14px rgba(66, 133, 244, 0.42);
+}
+
+@keyframes techstopArcShimmer {
+  0% {
+    stroke: #1A73E8;
+    filter: drop-shadow(0 0 6px rgba(26, 115, 232, 0.85));
+  }
+  50% {
+    stroke: #60A5FA;
+    filter: drop-shadow(0 0 8px rgba(96, 165, 250, 0.9));
+  }
+  100% {
+    stroke: #A855F7;
+    filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.9));
+  }
+}
 
 .channel-center {
   position: absolute;
@@ -3651,6 +3851,18 @@ input:focus-visible {
 .interact-prompt.chest-t1 { border-color: #F59E0B; color: #FDE68A; }
 .interact-prompt.chest-t2 { border-color: var(--g-blue-bright); color: #D3E3FD; }
 .interact-prompt.chest-t3 { border-color: #C084FC; color: #F3E8FF; }
+.interact-prompt.techstop {
+  border-color: var(--g-blue-bright);
+  background: linear-gradient(135deg, rgba(16, 36, 74, 0.92), rgba(20, 28, 48, 0.92));
+  color: #D3E3FD;
+  box-shadow: 0 0 16px rgba(26, 115, 232, 0.42), 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.interact-prompt.gbike {
+  border-color: var(--g-green);
+  background: linear-gradient(135deg, rgba(15, 52, 29, 0.92), rgba(18, 28, 34, 0.92));
+  color: #E6F4EA;
+  box-shadow: 0 0 16px rgba(52, 168, 83, 0.42), 0 8px 24px rgba(0, 0, 0, 0.45);
+}
 
 .keycap {
   display: inline-flex;
@@ -3747,6 +3959,13 @@ input:focus-visible {
   border-color: #7DD3FC;
   color: #E0F2FE;
   box-shadow: 0 0 12px rgba(56, 189, 248, 0.42);
+}
+
+.status-badge.gbike {
+  background: linear-gradient(135deg, rgba(24, 128, 56, 0.94), rgba(52, 168, 83, 0.94));
+  border-color: #81C995;
+  color: #E6F4EA;
+  box-shadow: 0 0 12px rgba(52, 168, 83, 0.45);
 }
 
 .status-badge.silenced {
@@ -4649,6 +4868,22 @@ input:focus-visible {
   height: 8px;
 }
 
+.lg-techstop {
+  background: #1A73E8;
+  border: 1.5px solid #FFFFFF;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.4);
+  transform: rotate(45deg);
+  width: 8px;
+  height: 8px;
+}
+
+.lg-gbike {
+  background: #34A853;
+  border: 1.5px solid #FFFFFF;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.35);
+  border-radius: 50%;
+}
+
 .lg-drop {
   width: 0;
   height: 0;
@@ -4673,6 +4908,11 @@ input:focus-visible {
 
 /* ==================== RESPONSIVE IN-GAME HUD & TACTICAL MAP BREAKPOINTS ==================== */
 @media (max-width: 760px) {
+  .sound-compass-ring {
+    width: 176px;
+    height: 176px;
+  }
+
   .hud-top-left {
     top: 10px;
     left: 10px;

@@ -49,7 +49,7 @@
               <div id="splash-preload-fill" class="splash-preload-fill"></div>
             </div>
             <div class="splash-preload-meta">
-              <span id="splash-preload-caption" class="splash-preload-caption">Loading Mountain View Campus · 0/50</span>
+              <span id="splash-preload-caption" class="splash-preload-caption">Loading Mountain View Campus · 0/52</span>
               <span id="splash-preload-pct" class="splash-preload-pct">0%</span>
             </div>
           </div>
@@ -649,6 +649,19 @@
                         </span>
                       </label>
                     </div>
+
+                    <div class="setting-row-block">
+                      <label class="setting-toggle-row" for="setting-visual-sound-compass">
+                        <span class="setting-toggle-meta">
+                          <span class="setting-label">Visual Sound Compass</span>
+                          <span class="setting-sub">Show directional footstep, gunfire, GBike &amp; Tier 3 chest arcs around crosshair</span>
+                        </span>
+                        <span class="toggle-switch">
+                          <input type="checkbox" id="setting-visual-sound-compass" checked />
+                          <span class="toggle-slider"></span>
+                        </span>
+                      </label>
+                    </div>
                   </div>
 
                   <!-- TAB 4: CONTROLS -->
@@ -731,6 +744,14 @@
                             <span class="keybind-action">Jump</span>
                             <span class="ws-keycap">Space</span>
                           </div>
+                          <div class="keybind-row">
+                            <span class="keybind-action">Ride / Dismount GBike (Bail at speed to Slide)</span>
+                            <span class="ws-keycap">E</span>
+                          </div>
+                          <div class="keybind-row">
+                            <span class="keybind-action">Ring GBike Bell (while riding)</span>
+                            <span class="ws-keycap">LMB</span>
+                          </div>
                         </div>
 
                         <div class="keybind-group">
@@ -756,7 +777,7 @@
                         <div class="keybind-group">
                           <div class="keybind-group-title">Equipment &amp; Interface</div>
                           <div class="keybind-row">
-                            <span class="keybind-action">Open Chest / Loot</span>
+                            <span class="keybind-action">Open Chest / Loot / TechStop Upgrade</span>
                             <span class="ws-keycap">E</span>
                           </div>
                           <div class="keybind-row">
@@ -856,6 +877,7 @@
         <!-- Screen-edge Status Vignettes -->
         <div id="storm-vignette" class="storm-vignette hidden"></div>
         <div id="low-hp-vignette" class="low-hp-vignette hidden"></div>
+        <div id="shield-shatter-vignette" class="shield-shatter-vignette" aria-hidden="true"></div>
 
         <!-- TOP LEFT: Authentic 2D Googleplex Minimap, Storm Status & Perf Telemetry -->
         <div class="hud-top-left">
@@ -935,6 +957,9 @@
         </div>
 
         <!-- CENTER COMBAT OVERLAYS -->
+        <div id="sound-compass-ring" class="sound-compass-ring hidden" aria-hidden="true">
+          <svg id="sound-compass-svg" viewBox="-110 -110 220 220" width="220" height="220"></svg>
+        </div>
         <div id="damage-arc-layer" class="damage-arc-layer" aria-hidden="true"></div>
 
         <div id="crosshair" class="crosshair">
@@ -945,6 +970,7 @@
           <div class="ch-dot"></div>
           <div id="hitmarker" class="hitmarker"></div>
           <div id="crit-flash" class="crit-flash">HEADSHOT</div>
+          <div id="shield-break-flash" class="shield-break-flash">SHIELD BROKEN</div>
         </div>
 
         <div id="channel-ring" class="channel-ring hidden">
@@ -1058,6 +1084,8 @@
               <span class="legend-item"><i class="lg-swatch lg-t1"></i>Tier 1</span>
               <span class="legend-item"><i class="lg-swatch lg-t2"></i>Tier 2</span>
               <span class="legend-item"><i class="lg-swatch lg-t3"></i>Tier 3</span>
+              <span class="legend-item"><i class="lg-swatch lg-techstop"></i>TechStop</span>
+              <span class="legend-item"><i class="lg-swatch lg-gbike"></i>GBike</span>
               <span class="legend-item"><i class="lg-swatch lg-drop"></i>Supply Drop</span>
               <span class="legend-item"><i class="lg-swatch lg-wp"></i>Waypoint</span>
               <span class="legend-item"><i class="lg-swatch lg-storm"></i>Storm</span>

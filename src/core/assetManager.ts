@@ -28,10 +28,16 @@ export interface HeroInstance {
   headNode: THREE.Object3D | null;
   leftHandNode: THREE.Object3D | null;
   rightHandNode: THREE.Object3D | null;
+  upperArmLNode: THREE.Object3D | null;
+  lowerArmLNode: THREE.Object3D | null;
+  upperArmRNode: THREE.Object3D | null;
+  lowerArmRNode: THREE.Object3D | null;
   thighLNode: THREE.Object3D | null;
   shinLNode: THREE.Object3D | null;
+  footLNode: THREE.Object3D | null;
   thighRNode: THREE.Object3D | null;
   shinRNode: THREE.Object3D | null;
+  footRNode: THREE.Object3D | null;
   gliderMount: THREE.Group;
   overheadGroup: THREE.Group;
   hpBarFill: THREE.Mesh;
@@ -86,6 +92,29 @@ export interface LootChestVisual {
   /** Swaps this chest's ring & accent slots to shared dimmed "opened" materials without mutating unopened chests */
   markOpened?: () => void;
 }
+
+export interface RideableGBikeVisual {
+  root: THREE.Group;
+  frontAssembly: THREE.Object3D | null;
+  wheelFront: THREE.Object3D | null;
+  wheelRear: THREE.Object3D | null;
+  crankPedals: THREE.Object3D | null;
+  seatMount: THREE.Object3D | null;
+  frameMat: THREE.MeshStandardMaterial | null;
+  fenderMat: THREE.MeshStandardMaterial | null;
+}
+
+export interface TechStopVisual {
+  root: THREE.Group;
+  holoIcon: THREE.Object3D | null;
+}
+
+const GBIKE_LIVERY_PAIRS: readonly { frameHex: number; fenderHex: number }[] = [
+  { frameHex: 0x4285f4, fenderHex: 0xfbbc04 }, // 0: Google Blue + Google Yellow
+  { frameHex: 0xea4335, fenderHex: 0x4285f4 }, // 1: Google Red + Google Blue
+  { frameHex: 0x34a853, fenderHex: 0xfbbc04 }, // 2: Google Green + Google Yellow
+  { frameHex: 0xfbbc04, fenderHex: 0xea4335 }, // 3: Google Yellow + Google Red
+];
 
 const ANIM_NAMES: AnimName[] = [
   'Idle',
@@ -374,6 +403,8 @@ export const PROP_ASSET_PATHS: Record<PropAssetId, string> = {
   supply_drop: '/assets/utilities/prop_supply_drop.glb',
   glider: '/assets/utilities/prop_glider.glb',
   loot_chest: '/assets/utilities/prop_loot_chest.glb',
+  gbike_rideable: '/assets/map/prop_gbike_rideable.glb',
+  techstop_kiosk: '/assets/map/prop_techstop_kiosk.glb',
 };
 
 export const MAP_ASSET_PATHS: Record<MapAssetKey, string> = {
@@ -491,7 +522,7 @@ export class AssetManager {
   }
 
   /**
-   * Preloads all 50 Blender .glb assets (heroes, weapons, utilities, props, 3x Mountain View Googleplex landmarks & outdoor park defenses).
+   * Preloads all 52 Blender .glb assets (heroes, weapons, utilities, props, rideable GBike, TechStop kiosk, 3x Mountain View Googleplex landmarks & outdoor park defenses).
    * Safe to call multiple times; deduplicates concurrent invocations.
    */
   public preloadAll(onProgress?: (progress: LoadingProgress) => void): Promise<void> {
@@ -537,7 +568,11 @@ export class AssetManager {
             ? 'Prop · Tactical Glider'
             : id === 'loot_chest'
               ? 'Prop · Loot Chest'
-              : 'Prop · Supply Drop',
+              : id === 'gbike_rideable'
+                ? 'Prop · Rideable GBike'
+                : id === 'techstop_kiosk'
+                  ? 'Prop · TechStop Kiosk'
+                  : 'Prop · Supply Drop',
       });
     }
     for (const [key, url] of Object.entries(MAP_ASSET_PATHS)) {
@@ -719,15 +754,21 @@ export class AssetManager {
 
     root.add(model);
 
-    // Find Spine, Chest, Head, Hand_L, Hand_R, Thigh/Shin legs, and WeaponSocket_R reliably inside cloned armature hierarchy
+    // Find Spine, Chest, Head, arms/hands, Thigh/Shin/Foot legs, and WeaponSocket_R reliably inside cloned armature hierarchy
     const spineNode = model.getObjectByName('Spine') ?? null;
     const chestNode = model.getObjectByName('Chest') ?? null;
     const leftHandNode = model.getObjectByName('Hand_L') ?? null;
     const rightHandNode = model.getObjectByName('Hand_R') ?? null;
+    const upperArmLNode = model.getObjectByName('UpperArm_L') ?? null;
+    const lowerArmLNode = model.getObjectByName('LowerArm_L') ?? null;
+    const upperArmRNode = model.getObjectByName('UpperArm_R') ?? null;
+    const lowerArmRNode = model.getObjectByName('LowerArm_R') ?? null;
     const thighLNode = model.getObjectByName('Thigh_L') ?? null;
     const shinLNode = model.getObjectByName('Shin_L') ?? null;
+    const footLNode = model.getObjectByName('Foot_L') ?? null;
     const thighRNode = model.getObjectByName('Thigh_R') ?? null;
     const shinRNode = model.getObjectByName('Shin_R') ?? null;
+    const footRNode = model.getObjectByName('Foot_R') ?? null;
 
     let weaponSocket = model.getObjectByName('WeaponSocket_R') ?? null;
     if (!weaponSocket) {
@@ -882,10 +923,16 @@ export class AssetManager {
       headNode,
       leftHandNode,
       rightHandNode,
+      upperArmLNode,
+      lowerArmLNode,
+      upperArmRNode,
+      lowerArmRNode,
       thighLNode,
       shinLNode,
+      footLNode,
       thighRNode,
       shinRNode,
+      footRNode,
       gliderMount,
       overheadGroup,
       hpBarFill,
@@ -1593,6 +1640,199 @@ export class AssetManager {
 
   public setLootChestOpened(visual: LootChestVisual): void {
     visual.markOpened?.();
+  }
+
+  /**
+   * Instantiates a rideable Google GBike (`prop_gbike_rideable.glb`), cloning ONLY the
+   * `GBike_FramePrimary` and `GBike_FenderAccent` materials per instance so authentic
+   * 4-variant Google liveries never mutate shared cached materials.
+   */
+  public instantiateRideableGBike(colorVariantIndex: number): RideableGBikeVisual {
+    const safeIdx = ((Math.floor(colorVariantIndex) % GBIKE_LIVERY_PAIRS.length) + GBIKE_LIVERY_PAIRS.length) % GBIKE_LIVERY_PAIRS.length;
+    const livery = GBIKE_LIVERY_PAIRS[safeIdx];
+    const gltf = this.cache.get('prop:gbike_rideable');
+    const root = new THREE.Group();
+    root.name = `RideableGBike_v${safeIdx}`;
+
+    let frontAssembly: THREE.Object3D | null = null;
+    let wheelFront: THREE.Object3D | null = null;
+    let wheelRear: THREE.Object3D | null = null;
+    let crankPedals: THREE.Object3D | null = null;
+    let seatMount: THREE.Object3D | null = null;
+    let frameMat: THREE.MeshStandardMaterial | null = null;
+    let fenderMat: THREE.MeshStandardMaterial | null = null;
+
+    if (gltf) {
+      const cloned = gltf.scene.clone(true);
+      const tintMaterial = (mat: THREE.Material): THREE.Material => {
+        if (!mat || !mat.name) return mat;
+        const lower = mat.name.toLowerCase();
+        if (lower.includes('gbike_frameprimary')) {
+          if (!frameMat) {
+            frameMat = mat.clone() as THREE.MeshStandardMaterial;
+            if (frameMat.color) frameMat.color.setHex(livery.frameHex);
+          }
+          return frameMat;
+        }
+        if (lower.includes('gbike_fenderaccent')) {
+          if (!fenderMat) {
+            fenderMat = mat.clone() as THREE.MeshStandardMaterial;
+            if (fenderMat.color) fenderMat.color.setHex(livery.fenderHex);
+          }
+          return fenderMat;
+        }
+        return mat;
+      };
+
+      cloned.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          const mesh = obj as THREE.Mesh;
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          if (Array.isArray(mesh.material)) {
+            mesh.material = mesh.material.map(tintMaterial);
+          } else if (mesh.material) {
+            mesh.material = tintMaterial(mesh.material);
+          }
+        }
+      });
+
+      root.add(cloned);
+      frontAssembly = cloned.getObjectByName('GBike_FrontAssembly') ?? null;
+      wheelFront = cloned.getObjectByName('GBike_WheelFront') ?? null;
+      wheelRear = cloned.getObjectByName('GBike_WheelRear') ?? null;
+      crankPedals = cloned.getObjectByName('GBike_CrankPedals') ?? null;
+      seatMount = cloned.getObjectByName('GBike_SeatMount') ?? null;
+    } else {
+      // Minimal procedural fallback only if GLB failed to load
+      frameMat = new THREE.MeshStandardMaterial({
+        color: livery.frameHex,
+        metalness: 0.32,
+        roughness: 0.26,
+      });
+      fenderMat = new THREE.MeshStandardMaterial({
+        color: livery.fenderHex,
+        metalness: 0.2,
+        roughness: 0.35,
+      });
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.56, 1.35), frameMat);
+      frame.position.set(0, 0.52, 0);
+      frame.castShadow = true;
+      frame.receiveShadow = true;
+      root.add(frame);
+
+      const tireMat = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.85 });
+      const wheelGeo = new THREE.TorusGeometry(0.32, 0.045, 8, 20);
+      wheelGeo.rotateY(Math.PI / 2);
+
+      const frontPivot = new THREE.Group();
+      frontPivot.name = 'GBike_FrontAssembly';
+      frontPivot.position.set(0, 0.74, -0.36);
+      const wf = new THREE.Mesh(wheelGeo, tireMat);
+      wf.name = 'GBike_WheelFront';
+      wf.position.set(0, -0.4, -0.2);
+      wf.castShadow = true;
+      frontPivot.add(wf);
+      root.add(frontPivot);
+
+      const wr = new THREE.Mesh(wheelGeo, tireMat);
+      wr.name = 'GBike_WheelRear';
+      wr.position.set(0, 0.34, 0.52);
+      wr.castShadow = true;
+      root.add(wr);
+
+      const crank = new THREE.Group();
+      crank.name = 'GBike_CrankPedals';
+      crank.position.set(0, 0.3, 0.06);
+      root.add(crank);
+
+      const seat = new THREE.Object3D();
+      seat.name = 'GBike_SeatMount';
+      seat.position.set(0, 0.95, 0.2);
+      root.add(seat);
+
+      frontAssembly = frontPivot;
+      wheelFront = wf;
+      wheelRear = wr;
+      crankPedals = crank;
+      seatMount = seat;
+    }
+
+    return {
+      root,
+      frontAssembly,
+      wheelFront,
+      wheelRear,
+      crankPedals,
+      seatMount,
+      frameMat,
+      fenderMat,
+    };
+  }
+
+  /**
+   * Instantiates a Google TechStop Weapon Upgrade Center (`prop_techstop_kiosk.glb`),
+   * capturing the floating `TechStop_HoloIcon` node (`local (0, 1.29, -0.08)`) for live bob/spin
+   * and enabling clean shadows on opaque kiosk geometry.
+   */
+  public instantiateTechStop(): TechStopVisual {
+    const gltf = this.cache.get('prop:techstop_kiosk');
+    const root = new THREE.Group();
+    root.name = 'TechStopKiosk';
+
+    let holoIcon: THREE.Object3D | null = null;
+
+    if (gltf) {
+      const cloned = gltf.scene.clone(true);
+      cloned.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          const mesh = obj as THREE.Mesh;
+          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          const isTranslucentHolo = mats.some((m) => {
+            if (!m) return false;
+            const std = m as THREE.MeshStandardMaterial;
+            const n = (m.name || '').toLowerCase();
+            return (std.transparent && std.opacity < 0.95) || n.includes('holobeam') || n.includes('holoicon');
+          });
+          mesh.castShadow = !isTranslucentHolo;
+          mesh.receiveShadow = !isTranslucentHolo;
+        }
+      });
+      root.add(cloned);
+      holoIcon = cloned.getObjectByName('TechStop_HoloIcon') ?? null;
+    } else {
+      // Minimal fallback kiosk only if GLB failed to load
+      const desk = new THREE.Mesh(
+        new THREE.BoxGeometry(2.5, 1.0, 1.1),
+        new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.45 })
+      );
+      desk.position.y = 0.5;
+      desk.castShadow = true;
+      desk.receiveShadow = true;
+      root.add(desk);
+
+      const canopy = new THREE.Mesh(
+        new THREE.BoxGeometry(2.52, 0.25, 1.12),
+        new THREE.MeshStandardMaterial({ color: 0x4285f4, roughness: 0.35 })
+      );
+      canopy.position.y = 2.3;
+      canopy.castShadow = true;
+      root.add(canopy);
+
+      const icon = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.18, 0),
+        new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.9 })
+      );
+      icon.name = 'TechStop_HoloIcon';
+      icon.position.set(0, 1.29, -0.08);
+      root.add(icon);
+      holoIcon = icon;
+    }
+
+    return {
+      root,
+      holoIcon,
+    };
   }
 }
 

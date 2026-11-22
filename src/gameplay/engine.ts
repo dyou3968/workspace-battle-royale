@@ -17,13 +17,17 @@ import {
   MatchSummary,
   MinimapChestPip,
   MinimapEntity,
+  MinimapGBike,
   MinimapLootPip,
   MinimapState,
   MinimapSupplyDrop,
+  MinimapTechStop,
   PerfStats,
   ProductHeroId,
   QualityPreset,
   Rarity,
+  SoundCompassCue,
+  SoundCueKind,
   SupplyDropBearing,
   UtilityItemId,
   WeaponId,
@@ -53,12 +57,13 @@ import {
   LootChestVisual,
   LootDropVisual,
   ReloadLowerMode,
+  RideableGBikeVisual,
   sharedAssetManager,
   WeaponInstance,
 } from '../core/assetManager';
 import { sharedAudio, SoundEngine } from '../core/audio';
 import { PhysicsWorld } from '../core/physics';
-import { GoogleplexWorld } from '../world/googleplex';
+import { GoogleplexWorld, TechStopPlacement } from '../world/googleplex';
 import { ThirdPersonCamera } from './camera';
 import {
   DEFAULT_LOBBY_FOV,
@@ -83,7 +88,8 @@ import {
 export interface HudCallbacks {
   onHudUpdate: (snapshot: HudSnapshot) => void;
   onKillFeed: (entry: KillFeedEntry) => void;
-  onHitMarker: (isHeadshot: boolean, isKill: boolean) => void;
+  onHitMarker: (isHeadshot: boolean, isKill: boolean, shieldBroken?: boolean) => void;
+  onPlayerShieldBreak?: () => void;
   onFloatingDamage: (event: FloatingDamageEvent) => void;
   onDirectionalDamage: (event: DirectionalDamageEvent) => void;
   onAnnouncement: (title: string, subtitle?: string) => void;
@@ -99,7 +105,7 @@ interface DocsHistorySample {
 }
 
 interface ActiveChannel {
-  kind: 'consumable' | 'supply_drop' | 'chest';
+  kind: 'consumable' | 'supply_drop' | 'chest' | 'techstop';
   label: string;
   slotIndex: number;
   itemId?: UtilityItemId;
@@ -107,6 +113,9 @@ interface ActiveChannel {
   supplyDropId?: string;
   chestId?: string;
   chestTier?: ChestTier;
+  techStopId?: string;
+  targetRarity?: Rarity;
+  manaCost?: number;
   elapsed: number;
   duration: number;
 }
@@ -162,6 +171,7 @@ interface Combatant {
   slideInitiatedByCtrl: boolean;
   sprinting: boolean;
   isAds: boolean;
+  ridingGBikeId: string | null;
   surface: 'grass' | 'stone' | 'sand' | 'metal';
 
   health: number;
@@ -227,6 +237,10 @@ interface Combatant {
     shinL: THREE.Quaternion;
     thighR: THREE.Quaternion;
     shinR: THREE.Quaternion;
+    upperArmL: THREE.Quaternion;
+    lowerArmL: THREE.Quaternion;
+    upperArmR: THREE.Quaternion;
+    lowerArmR: THREE.Quaternion;
   };
 
   // Performance: 10 Hz staggered Bot AI & Animation LOD state
@@ -331,6 +345,38 @@ interface SupplyDropEntity {
   root: THREE.Group;
   parachuteNode: THREE.Object3D | null;
   beacon: THREE.Group;
+}
+
+interface WorldGBike {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  speed: number;
+  velY: number;
+  grounded: boolean;
+  steerAngle: number;
+  leanAngle: number;
+  parkTilt: number;
+  wheelSpin: number;
+  pedalSpin: number;
+  rollTickTimer: number;
+  bellCooldown: number;
+  hopCooldown: number;
+  soundCueTimer: number;
+  riderId: string | null;
+  visual: RideableGBikeVisual;
+}
+
+interface SoundEventRecord {
+  kind: SoundCueKind;
+  x: number;
+  z: number;
+  maxRange: number;
+  age: number;
+  ttl: number;
+  weight: number;
 }
 
 const BOT_CALLSIGNS: Record<ProductHeroId, string[]> = {
@@ -444,13 +490,17 @@ export class WorkspaceRoyaleEngine {
   private chronoZones: ChronoZone[] = [];
   private pendingBeams: PendingSlidesBeam[] = [];
   private supplyDrops: SupplyDropEntity[] = [];
+  private worldGBikes: WorldGBike[] = [];
+  private soundEvents: SoundEventRecord[] = [];
   private supplyDropsSpawned = 0;
+  private worldVisualTime = 0;
 
   private nextProjectileSeq = 1;
   private nextLootSeq = 1;
   private nextChestSeq = 1;
   private nextKillFeedSeq = 1;
   private nextBarrierSeq = 1;
+  private nextGBikeSeq = 1;
   private unarmedHintCooldown = 0;
 
   // 5-Phase Storm State (3× Mountain View Campus: 365m -> 245m -> 155m -> 88m -> 42m -> 14m)
@@ -492,6 +542,13 @@ export class WorkspaceRoyaleEngine {
   private readonly tmpVecA = new THREE.Vector3();
   private readonly tmpVecB = new THREE.Vector3();
   private readonly tmpVecC = new THREE.Vector3();
+  private readonly tmpIkA = new THREE.Vector3();
+  private readonly tmpIkB = new THREE.Vector3();
+  private readonly tmpIkC = new THREE.Vector3();
+  private readonly tmpIkD = new THREE.Vector3();
+  private readonly tmpIkE = new THREE.Vector3();
+  private readonly tmpIkTarget = new THREE.Vector3();
+  private readonly tmpIkPole = new THREE.Vector3();
   private readonly tmpQuatA = new THREE.Quaternion();
   private readonly tmpQuatB = new THREE.Quaternion();
   private readonly tmpQuatC = new THREE.Quaternion();
@@ -502,6 +559,10 @@ export class WorkspaceRoyaleEngine {
     shinL: new THREE.Quaternion(),
     thighR: new THREE.Quaternion(),
     shinR: new THREE.Quaternion(),
+    upperArmL: new THREE.Quaternion(),
+    lowerArmL: new THREE.Quaternion(),
+    upperArmR: new THREE.Quaternion(),
+    lowerArmR: new THREE.Quaternion(),
   };
   private readonly tmpProj = new THREE.Vector3();
 
@@ -861,6 +922,8 @@ export class WorkspaceRoyaleEngine {
 
     // Populate closed Tier 1–3 Blender Loot Chests across all authentic Googleplex loot spots (ZERO pre-existing bare ground loot!)
     this.spawnInitialCampusChests();
+    // Spawn all 18 rideable Google GBikes across campus corrals & iconic hubs
+    this.spawnInitialCampusGBikes();
 
     // Shuffle the 20 perimeter glider drop points (altitude = 135m)
     const dropRing = [...this.world.gliderDropPoints];
@@ -1015,6 +1078,7 @@ export class WorkspaceRoyaleEngine {
       slideInitiatedByCtrl: false,
       sprinting: false,
       isAds: false,
+      ridingGBikeId: null,
       surface: 'stone',
       health: GAME_CONSTANTS.START_HEALTH,
       shield: GAME_CONSTANTS.START_SHIELD,
@@ -1085,6 +1149,10 @@ export class WorkspaceRoyaleEngine {
         shinL: new THREE.Quaternion(),
         thighR: new THREE.Quaternion(),
         shinR: new THREE.Quaternion(),
+        upperArmL: new THREE.Quaternion(),
+        lowerArmL: new THREE.Quaternion(),
+        upperArmR: new THREE.Quaternion(),
+        lowerArmR: new THREE.Quaternion(),
       },
       // Evenly stagger 10 Hz bot thinking across [0.00, 0.10)s so ~2-3 bots think per 60fps frame
       aiThinkTimer: opts.isPlayer ? 0 : ((opts.botIndex ?? 0) / totalBots) * 0.1,
@@ -1152,6 +1220,12 @@ export class WorkspaceRoyaleEngine {
     }
     this.supplyDrops.length = 0;
 
+    for (const bike of this.worldGBikes) {
+      this.scene.remove(bike.visual.root);
+    }
+    this.worldGBikes.length = 0;
+
+    this.soundEvents.length = 0;
     this.pendingBeams.length = 0;
     this.vfx.clear();
   }
@@ -1242,6 +1316,43 @@ export class WorkspaceRoyaleEngine {
     }
   }
 
+  private spawnInitialCampusGBikes(): void {
+    if (!this.world) return;
+    for (const spawn of this.world.gbikeSpawns) {
+      const visual = this.assetManager.instantiateRideableGBike(spawn.variant);
+      const parkTilt = 0.14;
+      visual.root.position.set(spawn.x, spawn.y, spawn.z);
+      visual.root.rotation.order = 'YXZ';
+      visual.root.rotation.set(0, spawn.rotY, parkTilt);
+      if (visual.frontAssembly) {
+        visual.frontAssembly.rotation.y = 0.16;
+      }
+      this.scene.add(visual.root);
+
+      this.worldGBikes.push({
+        id: `gbike_${this.nextGBikeSeq++}`,
+        x: spawn.x,
+        y: spawn.y,
+        z: spawn.z,
+        yaw: spawn.rotY,
+        speed: 0,
+        velY: 0,
+        grounded: true,
+        steerAngle: 0.16,
+        leanAngle: 0,
+        parkTilt,
+        wheelSpin: 0,
+        pedalSpin: 0,
+        rollTickTimer: 0,
+        bellCooldown: 0,
+        hopCooldown: 0,
+        soundCueTimer: 0,
+        riderId: null,
+        visual,
+      });
+    }
+  }
+
   private spawnLootDrop(
     x: number,
     y: number,
@@ -1301,7 +1412,11 @@ export class WorkspaceRoyaleEngine {
     });
 
     const distToPlayer = this.player ? Math.hypot(chest.x - this.player.pos.x, chest.z - this.player.pos.z) : 0;
-    this.audio.playChestOpenComplete(chest.tier, opener.isPlayer ? 0 : distToPlayer);
+    this.audio.playChestOpenComplete(
+      chest.tier,
+      opener.isPlayer ? 0 : distToPlayer,
+      opener.isPlayer ? 0 : this.computeSpatialPan(burstPos)
+    );
 
     // Eject 1–3 rolled items in a clean semicircular arc right in front of the opened chest
     const drops = rollChestLoot(chest.tier, this.activeGameMode);
@@ -1377,6 +1492,9 @@ export class WorkspaceRoyaleEngine {
       this.smoothedFps += (instantFps - this.smoothedFps) * 0.12;
     }
 
+    this.worldVisualTime += dt;
+    this.updateTechStopVisuals(dt);
+
     if (this.matchPhase === 'lobby') {
       if (this.splashAttract && this.splashAttract.isActive() && this.world) {
         this.splashAttract.update(dt, this.camController.camera, this.world);
@@ -1393,11 +1511,13 @@ export class WorkspaceRoyaleEngine {
 
     this.matchElapsed += dt;
     this.unarmedHintCooldown = Math.max(0, this.unarmedHintCooldown - dt);
+    this.updateSoundEvents(dt);
     this.updateStorm(dt);
     this.updateSupplyDrops(dt);
     this.updateActiveZones(dt);
     this.updatePendingSlidesBeams(dt);
     this.updateCombatants(dt);
+    this.updateWorldGBikes(dt);
     this.updateProjectiles(dt);
     this.updateLootChests(dt);
     this.updateLootVisuals(dt);
@@ -1776,8 +1896,19 @@ export class WorkspaceRoyaleEngine {
         const dist = Math.hypot(dx, dz);
         if (dist < gz.radius && dist > 0.01) {
           const push = (gz.radius - dist) + 0.25;
-          c.pos.x += (dx / dist) * Math.min(push, 18 * dt);
-          c.pos.z += (dz / dist) * Math.min(push, 18 * dt);
+          const step = Math.min(push, 18 * dt);
+          const ox = (dx / dist) * step;
+          const oz = (dz / dist) * step;
+          c.pos.x += ox;
+          c.pos.z += oz;
+          if (c.ridingGBikeId) {
+            const bike = this.worldGBikes.find((b) => b.id === c.ridingGBikeId);
+            if (bike) {
+              bike.x += ox;
+              bike.z += oz;
+              bike.speed *= 0.82;
+            }
+          }
         }
       }
 
@@ -1877,37 +2008,28 @@ export class WorkspaceRoyaleEngine {
     return mode.moveSpeedMult * chronoSpeedMult;
   }
 
-  private tryStartSlide(p: Combatant, initiatedByCtrl: boolean): boolean {
-    if (
-      !p.alive ||
-      !p.grounded ||
-      p.skyDropping ||
-      p.rewind.active ||
-      p.channel ||
-      p.sliding ||
-      p.slideCooldown > 0
-    ) {
+  private startSlideFromVelocity(
+    p: Combatant,
+    dirX: number,
+    dirZ: number,
+    launchSpeed: number,
+    initiatedByCtrl = false
+  ): boolean {
+    if (!p.alive || p.skyDropping || p.rewind.active || p.channel || p.sliding) {
       return false;
     }
-
-    const horizSpeed = Math.hypot(p.vel.x, p.vel.z);
-    if (horizSpeed < GAME_CONSTANTS.SLIDE_MIN_ENTRY_SPEED) {
-      return false;
-    }
-
-    p.slideDirX = p.vel.x / horizSpeed;
-    p.slideDirZ = p.vel.z / horizSpeed;
-
-    const speedMult = this.getCombatantSpeedMult(p);
-    const launchBase =
-      horizSpeed >= 10.2 ? GAME_CONSTANTS.SLIDE_SPRINT_SPEED : GAME_CONSTANTS.SLIDE_RUN_SPEED;
-    p.slideSpeed = launchBase * speedMult;
+    const len = Math.hypot(dirX, dirZ);
+    if (len < 0.01) return false;
+    p.slideDirX = dirX / len;
+    p.slideDirZ = dirZ / len;
+    p.slideSpeed = Math.max(GAME_CONSTANTS.SLIDE_RUN_SPEED, launchSpeed);
 
     p.sliding = true;
     p.crouching = true;
     p.sprinting = false;
     p.slideTimer = GAME_CONSTANTS.SLIDE_DURATION;
     p.slideElapsed = 0;
+    p.slideCooldown = 0;
     p.slideInitiatedByCtrl = initiatedByCtrl;
     p.slideVfxTimer = 0.045;
     p.vel.x = p.slideDirX * p.slideSpeed;
@@ -1922,6 +2044,431 @@ export class WorkspaceRoyaleEngine {
 
     this.vfx.spawnSlideDust(p.pos, p.slideDirX, p.slideDirZ, p.surface, true);
     return true;
+  }
+
+  private tryStartSlide(p: Combatant, initiatedByCtrl: boolean): boolean {
+    if (
+      !p.alive ||
+      !p.grounded ||
+      p.skyDropping ||
+      p.rewind.active ||
+      p.ridingGBikeId !== null ||
+      p.channel ||
+      p.sliding ||
+      p.slideCooldown > 0
+    ) {
+      return false;
+    }
+
+    const horizSpeed = Math.hypot(p.vel.x, p.vel.z);
+    if (horizSpeed < GAME_CONSTANTS.SLIDE_MIN_ENTRY_SPEED) {
+      return false;
+    }
+
+    const speedMult = this.getCombatantSpeedMult(p);
+    const launchBase =
+      horizSpeed >= 10.2 ? GAME_CONSTANTS.SLIDE_SPRINT_SPEED : GAME_CONSTANTS.SLIDE_RUN_SPEED;
+    return this.startSlideFromVelocity(
+      p,
+      p.vel.x / horizSpeed,
+      p.vel.z / horizSpeed,
+      launchBase * speedMult,
+      initiatedByCtrl
+    );
+  }
+
+  // =========================================================================
+  // RIDEABLE GOOGLE GBIKES & TECHSTOP WORLD VISUALS
+  // =========================================================================
+
+  private findNearestUnoccupiedGBike(
+    c: Combatant,
+    maxDist: number = GAME_CONSTANTS.GBIKE_MOUNT_RADIUS
+  ): WorldGBike | null {
+    let best: WorldGBike | null = null;
+    let bestDist = maxDist;
+    for (const bike of this.worldGBikes) {
+      if (bike.riderId !== null) continue;
+      const d = Math.hypot(bike.x - c.pos.x, bike.z - c.pos.z);
+      if (d <= bestDist && Math.abs(bike.y - c.pos.y) <= 2.4) {
+        bestDist = d;
+        best = bike;
+      }
+    }
+    return best;
+  }
+
+  private mountGBike(p: Combatant, bike: WorldGBike): boolean {
+    if (!p.alive || p.skyDropping || p.rewind.active || p.ridingGBikeId !== null || bike.riderId !== null) {
+      return false;
+    }
+    if (p.channel) this.cancelChannel(p);
+    if (p.isReloading) this.cancelReload(p);
+    if (p.sliding) this.endSlide(p, false);
+    if (p.isPlayer) {
+      this.crouchToggled = false;
+      this.ctrlSlideConsumed = false;
+    }
+    p.crouching = false;
+    p.sprinting = false;
+    p.isAds = false;
+    p.ridingGBikeId = bike.id;
+    bike.riderId = p.id;
+    bike.parkTilt = 0;
+
+    if (p.weaponInstance) {
+      p.weaponInstance.root.visible = false;
+    }
+
+    p.pos.set(bike.x, bike.y, bike.z);
+    p.vel.set(-Math.sin(bike.yaw) * bike.speed, bike.velY, -Math.cos(bike.yaw) * bike.speed);
+    p.yaw = bike.yaw;
+    p.grounded = bike.grounded;
+
+    if (p.isPlayer) {
+      this.audio.playGBikeMount(true);
+    }
+    return true;
+  }
+
+  private dismountGBike(c: Combatant, allowBailSlide = true): void {
+    if (!c.ridingGBikeId) return;
+    const bike = this.worldGBikes.find((b) => b.id === c.ridingGBikeId) ?? null;
+    c.ridingGBikeId = null;
+
+    if (c.weaponInstance && !c.skyDropping) {
+      c.weaponInstance.root.visible = true;
+    }
+    c.hero.root.rotation.set(0, c.yaw, 0);
+    c.hero.model.position.set(0, 0, 0);
+    c.hero.model.rotation.set(0, 0, 0);
+
+    if (!bike) return;
+    bike.riderId = null;
+
+    const bikeSpeed = bike.speed;
+    const absSpeed = Math.abs(bikeSpeed);
+    const fx = -Math.sin(bike.yaw);
+    const fz = -Math.cos(bike.yaw);
+    const rx = Math.cos(bike.yaw);
+    const rz = -Math.sin(bike.yaw);
+
+    // Choose a clear dismount position to the left/right of the bike so rider never clips walls
+    const originProbe = new THREE.Vector3(bike.x, bike.y + 0.9, bike.z);
+    const candidateOffsets: [number, number][] = [
+      [-rx * 1.05, -rz * 1.05], // Left side
+      [rx * 1.05, rz * 1.05],   // Right side
+      [fx * 0.9, fz * 0.9],     // Slightly forward
+      [0, 0],                   // Fallback at bike
+    ];
+    let dropX = bike.x;
+    let dropY = bike.y;
+    let dropZ = bike.z;
+    for (const [ox, oz] of candidateOffsets) {
+      const tx = THREE.MathUtils.clamp(
+        bike.x + ox,
+        GAME_CONSTANTS.ARENA_MIN_X + 3,
+        GAME_CONSTANTS.ARENA_MAX_X - 3
+      );
+      const tz = THREE.MathUtils.clamp(
+        bike.z + oz,
+        GAME_CONSTANTS.ARENA_MIN_Z + 3,
+        GAME_CONSTANTS.ARENA_MAX_Z - 3
+      );
+      const probe = new THREE.Vector3(tx, bike.y + 0.9, tz);
+      const supportY = this.physics.getSupportHeight(tx, tz, bike.y + 1.2, 0.42, 0.65);
+      if ((ox === 0 && oz === 0) || (this.physics.hasLineOfSight(originProbe, probe) && Math.abs(supportY - bike.y) <= 1.2)) {
+        dropX = tx;
+        dropY = Math.max(supportY, bike.grounded ? supportY : bike.y);
+        dropZ = tz;
+        break;
+      }
+    }
+
+    c.pos.set(dropX, dropY, dropZ);
+    const supportAtDrop = this.physics.getSupportHeight(dropX, dropZ, dropY + 0.8, 0.42, 0.65);
+    c.grounded = Math.abs(dropY - supportAtDrop) <= 0.45;
+    if (c.grounded) {
+      c.pos.y = supportAtDrop;
+    }
+
+    if (c.isPlayer && c.alive) {
+      this.audio.playGBikeMount(false);
+    }
+
+    // Bail-Out Into Slide when dismounting at speed (>= 8.5 m/s)!
+    if (
+      allowBailSlide &&
+      c.alive &&
+      !c.rewind.active &&
+      absSpeed >= GAME_CONSTANTS.GBIKE_BAIL_SLIDE_MIN_SPEED
+    ) {
+      const dirSign = bikeSpeed >= 0 ? 1 : -1;
+      const slideDirX = fx * dirSign;
+      const slideDirZ = fz * dirSign;
+      const launchSpeed = Math.min(
+        GAME_CONSTANTS.GBIKE_BOOST_SPEED,
+        Math.max(GAME_CONSTANTS.SLIDE_SPRINT_SPEED, absSpeed * 1.04)
+      );
+      c.vel.y = 0;
+      this.startSlideFromVelocity(c, slideDirX, slideDirZ, launchSpeed, false);
+      // Let unoccupied GBike coast forward ~1.2s smoothly before settling on kickstand
+      bike.speed = bikeSpeed * 0.88;
+      return;
+    }
+
+    // Standard low-speed / elimination / rewind dismount
+    c.vel.set(fx * bikeSpeed * 0.35, Math.max(0, bike.velY * 0.5), fz * bikeSpeed * 0.35);
+    bike.speed = bikeSpeed * 0.72;
+  }
+
+  private updatePlayerOnGBike(p: Combatant, bike: WorldGBike, dt: number, speedMult: number): void {
+    const fInput = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0);
+    const steerInput = (this.keys.has('KeyA') ? 1 : 0) - (this.keys.has('KeyD') ? 1 : 0);
+    const boostHeld = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+
+    p.isAds = false;
+    p.crouching = false;
+    p.sliding = false;
+    p.sprinting = boostHeld && fInput > 0 && bike.speed > 2.5;
+
+    const maxFwd = (boostHeld ? GAME_CONSTANTS.GBIKE_BOOST_SPEED : GAME_CONSTANTS.GBIKE_MAX_SPEED) * speedMult;
+    const maxRev = GAME_CONSTANTS.GBIKE_REVERSE_SPEED * speedMult;
+
+    if (fInput > 0) {
+      if (bike.speed < 0) {
+        bike.speed = Math.min(0, bike.speed + 26.0 * dt);
+      } else if (bike.speed < maxFwd) {
+        const accel = boostHeld ? 16.5 : 13.5;
+        bike.speed = Math.min(maxFwd, bike.speed + accel * dt);
+      } else {
+        // Released Shift boost: coast gently back to cruise speed
+        bike.speed = Math.max(maxFwd, bike.speed - 6.8 * dt);
+      }
+    } else if (fInput < 0) {
+      if (bike.speed > 0.1) {
+        bike.speed = Math.max(0, bike.speed - 24.0 * dt);
+      } else {
+        bike.speed = Math.max(-maxRev, bike.speed - 9.5 * dt);
+      }
+    } else {
+      // Natural rolling coasting drag
+      const drag = bike.grounded ? 5.2 : 1.4;
+      if (Math.abs(bike.speed) <= drag * dt) {
+        bike.speed = 0;
+      } else {
+        bike.speed -= Math.sign(bike.speed) * drag * dt;
+      }
+    }
+
+    // Steering & lean
+    const targetSteer = steerInput * 0.44;
+    bike.steerAngle += (targetSteer - bike.steerAngle) * Math.min(1, dt * 13);
+
+    const absSpd = Math.abs(bike.speed);
+    const turnScale =
+      absSpd < 0.8
+        ? 0.68
+        : THREE.MathUtils.clamp(0.76 + (absSpd / GAME_CONSTANTS.GBIKE_MAX_SPEED) * 0.4, 0.76, 1.16);
+    const reverseSign = bike.speed < -0.4 ? -1 : 1;
+    const yawDelta = steerInput * 2.1 * turnScale * reverseSign * dt;
+    bike.yaw += yawDelta;
+    // Gently nudge camera yaw with steering while preserving free 360° mouse orbit
+    p.yaw += yawDelta;
+
+    const leanFactor = THREE.MathUtils.clamp(absSpd / 11.0, 0, 1);
+    const targetLean = steerInput * reverseSign * 0.34 * leanFactor;
+    bike.leanAngle += (targetLean - bike.leanAngle) * Math.min(1, dt * 10);
+    bike.parkTilt += (0 - bike.parkTilt) * Math.min(1, dt * 12);
+
+    // Quick Bunny Hop on Space
+    bike.hopCooldown = Math.max(0, bike.hopCooldown - dt);
+    if (this.keys.has('Space') && bike.grounded && bike.hopCooldown <= 0) {
+      bike.velY = GAME_CONSTANTS.GBIKE_HOP_IMPULSE;
+      bike.grounded = false;
+      bike.hopCooldown = 0.55;
+    }
+
+    // Resolve movement & terrain following via PhysicsWorld
+    const fx = -Math.sin(bike.yaw);
+    const fz = -Math.cos(bike.yaw);
+    const prevX = bike.x;
+    const prevZ = bike.z;
+    const wasGrounded = bike.grounded;
+    const prevVelY = bike.velY;
+
+    const bikePos = this.tmpVecA.set(bike.x, bike.y, bike.z);
+    const bikeVel = this.tmpVecB.set(fx * bike.speed, bike.velY, fz * bike.speed);
+    const moveRes = this.physics.resolveCombatantMovement(
+      bikePos,
+      bikeVel,
+      0.52,
+      GAME_CONSTANTS.STANDING_HEIGHT,
+      dt
+    );
+    bike.x = bikePos.x;
+    bike.y = bikePos.y;
+    bike.z = bikePos.z;
+    bike.velY = bikeVel.y;
+    bike.grounded = moveRes.grounded;
+
+    // Damp speed cleanly on head-on wall or tree impact
+    const dispFwd = (bike.x - prevX) * fx + (bike.z - prevZ) * fz;
+    const actualFwdSpeed = dispFwd / Math.max(dt, 0.001);
+    if (Math.abs(bike.speed) > 1.5 && Math.abs(actualFwdSpeed) < Math.abs(bike.speed) * 0.35) {
+      bike.speed *= 0.25;
+    }
+
+    if (!wasGrounded && bike.grounded && -prevVelY > 5.5) {
+      this.audio.playLanding(-prevVelY > 12.0);
+    }
+
+    // Wheel & crank pedal spin (negative X rotation rolls forward along -Z)
+    bike.wheelSpin -= (bike.speed * dt) / 0.34;
+    if (fInput > 0 && bike.speed > 0.3) {
+      bike.pedalSpin -= (bike.speed * dt) / 0.22;
+    } else if (fInput < 0 && bike.speed < -0.2) {
+      bike.pedalSpin -= (bike.speed * dt) / 0.28;
+    }
+
+    // Subtle tire & freewheel cadence when rolling > 4 m/s
+    if (bike.grounded && Math.abs(bike.speed) > 4.0) {
+      bike.rollTickTimer -= dt;
+      if (bike.rollTickTimer <= 0) {
+        const speedRatio = THREE.MathUtils.clamp(Math.abs(bike.speed) / GAME_CONSTANTS.GBIKE_MAX_SPEED, 0.25, 1.35);
+        bike.rollTickTimer = THREE.MathUtils.clamp(0.32 / Math.max(speedRatio, 0.5), 0.16, 0.34);
+        this.audio.playGBikeRollTick(speedRatio);
+      }
+    }
+
+    // Handlebar Bell on Left Click
+    bike.bellCooldown = Math.max(0, bike.bellCooldown - dt);
+    if (this.mouseLeftDown && this.pointerLocked && !this.mapOpen && !p.semiAutoLatch) {
+      this.tryRingGBikeBell(p);
+    }
+
+    // Sync player combatant kinematics to bike
+    p.pos.set(bike.x, bike.y, bike.z);
+    p.vel.set(fx * bike.speed, bike.velY, fz * bike.speed);
+    p.grounded = bike.grounded;
+    p.surface = moveRes.surface;
+    p.airborneTime = bike.grounded ? 0 : p.airborneTime + dt;
+
+    // Auto-clear pinned tactical waypoint when arriving on GBike within 14m
+    if (this.waypoint) {
+      const wdx = this.waypoint.x - p.pos.x;
+      const wdz = this.waypoint.z - p.pos.z;
+      if (wdx * wdx + wdz * wdz <= 14 * 14) {
+        this.waypoint = null;
+      }
+    }
+  }
+
+  private tryRingGBikeBell(p: Combatant): boolean {
+    if (!p.alive || p.ridingGBikeId === null) return false;
+    const bike = this.worldGBikes.find((b) => b.id === p.ridingGBikeId);
+    if (!bike || bike.bellCooldown > 0) return false;
+    p.semiAutoLatch = true;
+    bike.bellCooldown = 0.45;
+    const fx = -Math.sin(bike.yaw);
+    const fz = -Math.cos(bike.yaw);
+    this.audio.playGBikeBell(0, 0);
+    this.pushSoundEvent('gbike', bike.x + fx * 0.65, bike.z + fz * 0.65, 55, 0.55, 0.9);
+    return true;
+  }
+
+  private updateWorldGBikes(dt: number): void {
+    for (const bike of this.worldGBikes) {
+      if (bike.riderId === null) {
+        bike.bellCooldown = Math.max(0, bike.bellCooldown - dt);
+        bike.hopCooldown = Math.max(0, bike.hopCooldown - dt);
+
+        if (Math.abs(bike.speed) > 0.06 || !bike.grounded) {
+          const decel = bike.grounded ? 9.5 : 1.5;
+          if (Math.abs(bike.speed) <= decel * dt) {
+            bike.speed = 0;
+          } else {
+            bike.speed -= Math.sign(bike.speed) * decel * dt;
+          }
+
+          const fx = -Math.sin(bike.yaw);
+          const fz = -Math.cos(bike.yaw);
+          const prevX = bike.x;
+          const prevZ = bike.z;
+          const bikePos = this.tmpVecA.set(bike.x, bike.y, bike.z);
+          const bikeVel = this.tmpVecB.set(fx * bike.speed, bike.velY, fz * bike.speed);
+          const moveRes = this.physics.resolveCombatantMovement(bikePos, bikeVel, 0.52, 1.25, dt);
+          bike.x = bikePos.x;
+          bike.y = bikePos.y;
+          bike.z = bikePos.z;
+          bike.velY = bikeVel.y;
+          bike.grounded = moveRes.grounded;
+
+          const dispFwd = (bike.x - prevX) * fx + (bike.z - prevZ) * fz;
+          const actualFwdSpeed = dispFwd / Math.max(dt, 0.001);
+          if (Math.abs(bike.speed) > 1.2 && Math.abs(actualFwdSpeed) < Math.abs(bike.speed) * 0.35) {
+            bike.speed *= 0.2;
+          }
+
+          bike.wheelSpin -= (bike.speed * dt) / 0.34;
+          bike.steerAngle += (0 - bike.steerAngle) * Math.min(1, dt * 8);
+          bike.leanAngle += (0 - bike.leanAngle) * Math.min(1, dt * 8);
+          bike.parkTilt += (0 - bike.parkTilt) * Math.min(1, dt * 8);
+
+          // Emit 'gbike' Visual Sound Compass cue while coasting bike moves nearby
+          if (Math.abs(bike.speed) > 2.2) {
+            bike.soundCueTimer -= dt;
+            if (bike.soundCueTimer <= 0) {
+              bike.soundCueTimer = 0.28;
+              this.pushSoundEvent('gbike', bike.x, bike.z, 55, 0.55, 0.9);
+            }
+          }
+        } else {
+          bike.speed = 0;
+          bike.leanAngle += (0 - bike.leanAngle) * Math.min(1, dt * 8);
+          bike.parkTilt += (0.14 - bike.parkTilt) * Math.min(1, dt * 5);
+          bike.steerAngle += (0.16 - bike.steerAngle) * Math.min(1, dt * 5);
+        }
+      } else if (bike.riderId !== this.player?.id && Math.abs(bike.speed) > 2.0) {
+        bike.soundCueTimer -= dt;
+        if (bike.soundCueTimer <= 0) {
+          bike.soundCueTimer = 0.28;
+          this.pushSoundEvent('gbike', bike.x, bike.z, 55, 0.55, 0.9);
+        }
+      }
+
+      // Apply live transforms to 3D GBike rig
+      this.syncGBikeVisualTransform(bike);
+    }
+  }
+
+  private syncGBikeVisualTransform(bike: WorldGBike): void {
+    bike.visual.root.position.set(bike.x, bike.y, bike.z);
+    bike.visual.root.rotation.order = 'YXZ';
+    bike.visual.root.rotation.set(0, bike.yaw, bike.leanAngle + bike.parkTilt);
+    if (bike.visual.frontAssembly) {
+      bike.visual.frontAssembly.rotation.y = bike.steerAngle;
+    }
+    if (bike.visual.wheelFront) {
+      bike.visual.wheelFront.rotation.x = bike.wheelSpin;
+    }
+    if (bike.visual.wheelRear) {
+      bike.visual.wheelRear.rotation.x = bike.wheelSpin;
+    }
+    if (bike.visual.crankPedals) {
+      bike.visual.crankPedals.rotation.x = bike.pedalSpin;
+    }
+  }
+
+  private updateTechStopVisuals(dt: number): void {
+    if (!this.world) return;
+    const stops = this.world.techStops;
+    for (let i = 0; i < stops.length; i++) {
+      const icon = stops[i].visual?.holoIcon;
+      if (!icon) continue;
+      icon.rotation.y += dt * 1.4;
+      icon.position.y = 1.29 + Math.sin(this.worldVisualTime * 2.4 + i * 1.15) * 0.05;
+    }
   }
 
   private endSlide(c: Combatant, keepCrouchIfCtrl: boolean): void {
@@ -2007,6 +2554,17 @@ export class WorkspaceRoyaleEngine {
         this.completeSkyDropTouchdown(p, groundY);
       }
       return;
+    }
+
+    // Rideable Google GBike Physics & Controls
+    if (p.ridingGBikeId !== null) {
+      const bike = this.worldGBikes.find((b) => b.id === p.ridingGBikeId);
+      if (bike) {
+        this.updatePlayerOnGBike(p, bike, dt, speedMult);
+        return;
+      }
+      p.ridingGBikeId = null;
+      if (p.weaponInstance) p.weaponInstance.root.visible = true;
     }
 
     // Ground / Combat Movement
@@ -2249,7 +2807,7 @@ export class WorkspaceRoyaleEngine {
       }
     }
 
-    // Supply Drop & Loot Chest channel proximity checks (cancel if player walks too far or already opened)
+    // Supply Drop, Loot Chest & TechStop channel proximity checks (cancel if player walks too far or already opened)
     if (p.channel?.kind === 'supply_drop' && p.channel.supplyDropId) {
       const sd = this.supplyDrops.find((d) => d.id === p.channel?.supplyDropId);
       if (!sd || sd.opened || Math.hypot(sd.x - p.pos.x, sd.z - p.pos.z) > 4.4) {
@@ -2258,6 +2816,11 @@ export class WorkspaceRoyaleEngine {
     } else if (p.channel?.kind === 'chest' && p.channel.chestId) {
       const ch = this.lootChests.find((c) => c.id === p.channel?.chestId);
       if (!ch || ch.opened || Math.hypot(ch.x - p.pos.x, ch.z - p.pos.z) > 4.0) {
+        this.cancelChannel(p);
+      }
+    } else if (p.channel?.kind === 'techstop' && p.channel.techStopId) {
+      const ts = this.world?.techStops.find((t) => t.id === p.channel?.techStopId);
+      if (!ts || Math.hypot(ts.x - p.pos.x, ts.z - p.pos.z) > 4.0) {
         this.cancelChannel(p);
       }
     }
@@ -2436,6 +2999,29 @@ export class WorkspaceRoyaleEngine {
       }
       b.airborneTime = 0;
       b.peakFallSpeed = 0;
+    }
+
+    // Enemy bot footstep visual-compass events + spatialized stereo footsteps (crouching stays stealthy!)
+    const botHorizSpeed = Math.hypot(b.vel.x, b.vel.z);
+    if (b.grounded && !b.crouching && botHorizSpeed > 1.5) {
+      b.footstepTimer -= dt;
+      if (b.footstepTimer <= 0) {
+        b.footstepTimer = b.sprinting ? 0.30 : 0.42;
+        this.pushSoundEvent(
+          'footstep',
+          b.pos.x,
+          b.pos.z,
+          b.sprinting ? 40 : 28,
+          0.45,
+          b.sprinting ? 0.95 : 0.72
+        );
+        if (this.player) {
+          const dist = b.pos.distanceTo(this.player.pos);
+          if (dist <= 32) {
+            this.audio.playFootstep(b.sprinting, false, b.surface, dist, this.computeSpatialPan(b.pos));
+          }
+        }
+      }
     }
 
     // Cancel bot's chest/supply-drop channel if target was already opened or bot drifted too far
@@ -2797,7 +3383,21 @@ export class WorkspaceRoyaleEngine {
     );
 
     const distToPlayer = this.player ? shooter.pos.distanceTo(this.player.pos) : 0;
-    this.audio.playShot(weaponId, shooter.isPlayer ? 0 : distToPlayer);
+    this.audio.playShot(
+      weaponId,
+      shooter.isPlayer ? 0 : distToPlayer,
+      shooter.isPlayer ? 0 : this.computeSpatialPan(shooter.pos)
+    );
+    if (!shooter.isPlayer) {
+      this.pushSoundEvent(
+        'gunfire',
+        shooter.pos.x,
+        shooter.pos.z,
+        weaponId === 'longbow_308' ? 120 : 95,
+        0.65,
+        1.0
+      );
+    }
 
     if (shooter.isPlayer) {
       const recoil =
@@ -3007,7 +3607,10 @@ export class WorkspaceRoyaleEngine {
     this.vfx.spawnExplosion(center, proj.splashRadius, color);
 
     const distToPlayer = this.player ? center.distanceTo(this.player.pos) : 0;
-    this.audio.playExplosion(distToPlayer);
+    this.audio.playExplosion(distToPlayer, this.computeSpatialPan(center));
+    if (proj.ownerId !== this.player?.id) {
+      this.pushSoundEvent('gunfire', center.x, center.z, 105, 0.85, 1.0);
+    }
     if (this.player && distToPlayer < 24) {
       this.camController.addShake(Math.max(0.05, (1 - distToPlayer / 24) * 0.28));
     }
@@ -3081,10 +3684,16 @@ export class WorkspaceRoyaleEngine {
       isHeadshot: meta.headshot,
     });
 
-    if (hadShield && victim.shield <= 0) {
+    const shieldBroken = hadShield && victim.shield <= 0;
+    if (shieldBroken) {
       this.vfx.spawnShieldBreak(victim.pos);
+      const isDirect = Boolean(attacker?.isPlayer || victim.isPlayer);
       const dist = this.player ? victim.pos.distanceTo(this.player.pos) : 0;
-      this.audio.playShieldCrack(dist);
+      this.audio.playShieldCrack(dist, isDirect, isDirect ? 0 : this.computeSpatialPan(victim.pos));
+      if (victim.isPlayer) {
+        this.callbacks.onPlayerShieldBreak?.();
+        this.camController.addShake(0.18);
+      }
     }
 
     const killed = victim.health <= 0;
@@ -3094,7 +3703,7 @@ export class WorkspaceRoyaleEngine {
       attacker.damageDealt += amount;
       if (meta.headshot) attacker.headshots++;
       this.audio.playHitmarker(meta.headshot, shieldAbsorbed > 0 && hpDamage === 0);
-      this.callbacks.onHitMarker(meta.headshot, killed);
+      this.callbacks.onHitMarker(meta.headshot, killed, shieldBroken);
 
       const screen = this.projectWorldToScreen(meta.hitPoint);
       if (screen) {
@@ -3150,6 +3759,9 @@ export class WorkspaceRoyaleEngine {
   ): void {
     if (!victim.alive) return;
     const aliveBefore = this.combatants.filter((c) => c.alive).length;
+    if (victim.ridingGBikeId) {
+      this.dismountGBike(victim, false);
+    }
     if (victim.sliding) {
       this.endSlide(victim, false);
     }
@@ -3296,13 +3908,21 @@ export class WorkspaceRoyaleEngine {
       return;
     }
 
+    if (caster.ridingGBikeId) this.dismountGBike(caster, false);
     if (caster.channel) this.cancelChannel(caster);
     if (caster.isReloading) this.cancelReload(caster);
     caster.mana = Math.max(0, caster.mana - ult.manaCost);
     caster.ultCooldown = ult.cooldown;
 
     const distToPlayer = this.player ? caster.pos.distanceTo(this.player.pos) : 0;
-    this.audio.playUltimate(caster.heroId, caster.isPlayer ? 0 : distToPlayer);
+    this.audio.playUltimate(
+      caster.heroId,
+      caster.isPlayer ? 0 : distToPlayer,
+      caster.isPlayer ? 0 : this.computeSpatialPan(caster.pos)
+    );
+    if (!caster.isPlayer) {
+      this.pushSoundEvent('gunfire', caster.pos.x, caster.pos.z, 105, 0.85, 1.0);
+    }
 
     if (caster.isPlayer) {
       this.callbacks.onAnnouncement(ult.name.toUpperCase(), ult.subtitle);
@@ -3606,6 +4226,9 @@ export class WorkspaceRoyaleEngine {
     }
 
     // Cleanse slows & auto-reload active weapon immediately
+    if (caster.ridingGBikeId) {
+      this.dismountGBike(caster, false);
+    }
     if (caster.sliding) {
       this.endSlide(caster, false);
     }
@@ -3832,6 +4455,34 @@ export class WorkspaceRoyaleEngine {
       return;
     }
 
+    if (ch.kind === 'techstop' && ch.techStopId && ch.targetRarity && ch.manaCost !== undefined) {
+      const slot = c.slots[ch.slotIndex];
+      if (
+        slot &&
+        slot.kind === 'weapon' &&
+        slot.rarity !== 'epic' &&
+        c.mana >= ch.manaCost
+      ) {
+        const wDef = WEAPONS[slot.id as WeaponId];
+        c.mana = Math.max(0, c.mana - ch.manaCost);
+        slot.rarity = ch.targetRarity;
+        slot.ammo = wDef.magSize;
+        this.syncEquippedWeaponVisual(c);
+
+        const ts = this.world?.techStops.find((t) => t.id === ch.techStopId);
+        const fxPos = ts ? new THREE.Vector3(ts.x, ts.y, ts.z) : c.pos.clone();
+        this.vfx.spawnTechStopUpgrade(fxPos, ch.targetRarity);
+        this.audio.playTechStopUpgrade(ch.targetRarity);
+        if (c.isPlayer) {
+          this.callbacks.onAnnouncement(
+            'TECHSTOP UPGRADE',
+            `Upgraded to ${RARITY_CONFIG[ch.targetRarity].label} ${wDef.name}`
+          );
+        }
+      }
+      return;
+    }
+
     if (ch.kind === 'consumable' && ch.itemId && ch.rarity) {
       const amount = getUtilityAmount(ch.itemId, ch.rarity);
       let color = 0x38bdf8;
@@ -3930,7 +4581,7 @@ export class WorkspaceRoyaleEngine {
       this.barriers.splice(idx, 1);
       this.vfx.spawnExplosion(barrier.pos, 3.0, 0x38bdf8);
       const dist = this.player ? barrier.pos.distanceTo(this.player.pos) : 0;
-      this.audio.playShieldCrack(dist);
+      this.audio.playShieldCrack(dist, false, this.computeSpatialPan(barrier.pos));
     }
   }
 
@@ -3990,7 +4641,10 @@ export class WorkspaceRoyaleEngine {
       duration: GAME_CONSTANTS.CHEST_OPEN_CHANNEL_TIME,
     };
     const dist = this.player ? Math.hypot(chest.x - this.player.pos.x, chest.z - this.player.pos.z) : 0;
-    this.audio.playChestOpenStart(c.isPlayer ? 0 : dist);
+    this.audio.playChestOpenStart(
+      c.isPlayer ? 0 : dist,
+      c.isPlayer ? 0 : this.computeSpatialPan(this.tmpVecA.set(chest.x, chest.y, chest.z))
+    );
     return true;
   }
 
@@ -4017,58 +4671,253 @@ export class WorkspaceRoyaleEngine {
     return '[E] Open Tier 1 Chest';
   }
 
-  private tryPlayerInteract(): void {
-    const p = this.player;
-    if (!p || !p.alive || p.skyDropping || p.channel) return;
-
-    // 1. Check nearby landed unopened Supply Drop first
-    for (const sd of this.supplyDrops) {
-      if (!sd.landed || sd.opened) continue;
-      if (Math.hypot(sd.x - p.pos.x, sd.z - p.pos.z) <= 3.8 && Math.abs(sd.y - p.pos.y) <= 2.5) {
-        if (p.silencedSec > 0) {
-          this.audio.playSilenced();
-          return;
-        }
-        if (p.sliding) {
-          this.endSlide(p, false);
-        }
-        this.cancelReload(p);
-        p.sprinting = false;
-        p.isAds = false;
-        p.channel = {
-          kind: 'supply_drop',
-          label: 'Opening Supply Drop...',
-          slotIndex: p.activeSlot,
-          supplyDropId: sd.id,
-          elapsed: 0,
-          duration: GAME_CONSTANTS.SUPPLY_DROP_CHANNEL_TIME,
-        };
-        return;
+  private findNearestTechStop(
+    c: Combatant,
+    maxDist: number = GAME_CONSTANTS.TECHSTOP_INTERACT_RADIUS
+  ): TechStopPlacement | null {
+    if (!this.world) return null;
+    let best: TechStopPlacement | null = null;
+    let bestDist = maxDist;
+    for (const ts of this.world.techStops) {
+      const d = Math.hypot(ts.x - c.pos.x, ts.z - c.pos.z);
+      if (d <= bestDist && Math.abs(ts.y - c.pos.y) <= 2.5) {
+        bestDist = d;
+        best = ts;
       }
     }
+    return best;
+  }
 
-    // 2. Compare nearest unopened Loot Chest (<= 3.2m) vs nearest popped Ground Loot (<= 3.4m)
+  private getTechStopPromptAndSpec(p: Combatant): {
+    prompt: string;
+    canUpgrade: boolean;
+    weaponName?: string;
+    targetRarity?: Rarity;
+    manaCost?: number;
+    duration?: number;
+    reason?: 'unarmed' | 'max_tier' | 'low_mana';
+  } {
+    const slot = p.slots[p.activeSlot];
+    if (!slot || slot.kind !== 'weapon') {
+      return {
+        prompt: 'TechStop: Equip a Common or Rare weapon',
+        canUpgrade: false,
+        reason: 'unarmed',
+      };
+    }
+    const wDef = WEAPONS[slot.id as WeaponId];
+    if (slot.rarity === 'common') {
+      const cost = GAME_CONSTANTS.TECHSTOP_RARE_MANA_COST;
+      const enough = p.mana >= cost;
+      return {
+        prompt: enough
+          ? `[E] TechStop Upgrade: ${wDef.name} → Rare (${cost} MP)`
+          : `[E] TechStop Upgrade → Rare (Need ${cost} MP)`,
+        canUpgrade: enough,
+        weaponName: wDef.name,
+        targetRarity: 'rare',
+        manaCost: cost,
+        duration: GAME_CONSTANTS.TECHSTOP_RARE_CHANNEL_TIME,
+        reason: enough ? undefined : 'low_mana',
+      };
+    }
+    if (slot.rarity === 'rare') {
+      const cost = GAME_CONSTANTS.TECHSTOP_EPIC_MANA_COST;
+      const enough = p.mana >= cost;
+      return {
+        prompt: enough
+          ? `[E] TechStop Upgrade: ${wDef.name} → Epic (${cost} MP)`
+          : `[E] TechStop Upgrade → Epic (Need ${cost} MP)`,
+        canUpgrade: enough,
+        weaponName: wDef.name,
+        targetRarity: 'epic',
+        manaCost: cost,
+        duration: GAME_CONSTANTS.TECHSTOP_EPIC_CHANNEL_TIME,
+        reason: enough ? undefined : 'low_mana',
+      };
+    }
+    return {
+      prompt: `TechStop: ${wDef.name} is Max Tier (Epic)`,
+      canUpgrade: false,
+      weaponName: wDef.name,
+      reason: 'max_tier',
+    };
+  }
+
+  private resolveNearestInteractable(p: Combatant):
+    | { kind: 'supply_drop'; supplyDrop: SupplyDropEntity; prompt: string }
+    | { kind: 'chest'; chest: LootChestEntity; prompt: string }
+    | { kind: 'loot'; loot: GroundLoot; prompt: string }
+    | { kind: 'techstop'; techStop: TechStopPlacement; prompt: string }
+    | { kind: 'gbike'; bike: WorldGBike; prompt: string }
+    | null {
+    // 1. Landed unopened Supply Drop takes top priority
+    const sd = this.supplyDrops.find(
+      (d) =>
+        d.landed &&
+        !d.opened &&
+        Math.hypot(d.x - p.pos.x, d.z - p.pos.z) <= 3.8 &&
+        Math.abs(d.y - p.pos.y) <= 2.5
+    );
+    if (sd) {
+      return { kind: 'supply_drop', supplyDrop: sd, prompt: '[E] Open Epic Supply Drop (1.5s)' };
+    }
+
+    const formatLootPrompt = (loot: GroundLoot): string => {
+      const rLabel = RARITY_CONFIG[loot.rarity].label;
+      const itemName =
+        loot.kind === 'weapon'
+          ? WEAPONS[loot.itemId as WeaponId].name
+          : UTILITY_ITEMS[loot.itemId as UtilityItemId].name;
+      return `[E] Pick up ${rLabel} ${itemName}`;
+    };
+
     const nearChest = this.findNearestUnopenedChest(p, GAME_CONSTANTS.CHEST_INTERACT_RADIUS);
     const nearLoot = this.findNearestLoot(p, 3.4);
+    const nearTechStop = this.findNearestTechStop(p, GAME_CONSTANTS.TECHSTOP_INTERACT_RADIUS);
+    const nearBike = this.findNearestUnoccupiedGBike(p, GAME_CONSTANTS.GBIKE_MOUNT_RADIUS);
 
-    if (nearChest && nearLoot) {
-      const chestDist = Math.hypot(nearChest.x - p.pos.x, nearChest.z - p.pos.z);
-      const lootDist = Math.hypot(nearLoot.x - p.pos.x, nearLoot.z - p.pos.z);
-      if (lootDist + 0.35 < chestDist) {
-        this.pickupLoot(p, nearLoot);
+    type Candidate = {
+      score: number;
+      result:
+        | { kind: 'chest'; chest: LootChestEntity; prompt: string }
+        | { kind: 'loot'; loot: GroundLoot; prompt: string }
+        | { kind: 'techstop'; techStop: TechStopPlacement; prompt: string }
+        | { kind: 'gbike'; bike: WorldGBike; prompt: string };
+    };
+    const candidates: Candidate[] = [];
+    if (nearChest) {
+      candidates.push({
+        score: Math.hypot(nearChest.x - p.pos.x, nearChest.z - p.pos.z),
+        result: { kind: 'chest', chest: nearChest, prompt: this.getChestPromptText(nearChest.tier) },
+      });
+    }
+    if (nearLoot) {
+      // Slight tie-break preference for dropped ground loot right underfoot vs. nearby chest
+      candidates.push({
+        score: Math.hypot(nearLoot.x - p.pos.x, nearLoot.z - p.pos.z) - 0.35,
+        result: { kind: 'loot', loot: nearLoot, prompt: formatLootPrompt(nearLoot) },
+      });
+    }
+    if (nearTechStop) {
+      candidates.push({
+        score: Math.hypot(nearTechStop.x - p.pos.x, nearTechStop.z - p.pos.z),
+        result: {
+          kind: 'techstop',
+          techStop: nearTechStop,
+          prompt: this.getTechStopPromptAndSpec(p).prompt,
+        },
+      });
+    }
+    if (nearBike) {
+      // Slightly lower priority than Chest/TechStop/Loot when standing right on top of one
+      candidates.push({
+        score: Math.hypot(nearBike.x - p.pos.x, nearBike.z - p.pos.z) + 0.45,
+        result: { kind: 'gbike', bike: nearBike, prompt: '[E] Ride GBike' },
+      });
+    }
+
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => a.score - b.score);
+    return candidates[0].result;
+  }
+
+  private tryStartTechStopUpgrade(p: Combatant, ts: TechStopPlacement): void {
+    if (p.silencedSec > 0) {
+      this.audio.playSilenced();
+      this.callbacks.onAnnouncement('ACCESS REVOKED', 'TechStop upgrade blocked while silenced!');
+      return;
+    }
+
+    const spec = this.getTechStopPromptAndSpec(p);
+    if (!spec.canUpgrade || !spec.targetRarity || spec.manaCost === undefined || !spec.duration) {
+      this.audio.playDryFire();
+      if (spec.reason === 'low_mana' && spec.manaCost !== undefined) {
+        this.callbacks.onAnnouncement('LOW MANA', `TechStop upgrade requires ${spec.manaCost} Mana`);
+      } else if (spec.reason === 'max_tier' && spec.weaponName) {
+        this.callbacks.onAnnouncement('TECHSTOP', `${spec.weaponName} is already Max Tier (Epic)`);
       } else {
-        this.startChestChannel(p, nearChest);
+        this.callbacks.onAnnouncement('TECHSTOP', 'Equip a Common or Rare weapon to upgrade');
       }
       return;
     }
 
-    if (nearChest) {
-      this.startChestChannel(p, nearChest);
+    if (p.sliding) {
+      this.endSlide(p, false);
+    }
+    this.cancelReload(p);
+    p.sprinting = false;
+    p.isAds = false;
+    if (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) {
+      this.sprintLatchedOnChannel = true;
+    }
+    p.channel = {
+      kind: 'techstop',
+      label: `Upgrading ${spec.weaponName}...`,
+      slotIndex: p.activeSlot,
+      techStopId: ts.id,
+      targetRarity: spec.targetRarity,
+      manaCost: spec.manaCost,
+      elapsed: 0,
+      duration: spec.duration,
+    };
+  }
+
+  private tryPlayerInteract(): void {
+    const p = this.player;
+    if (!p || !p.alive || p.skyDropping) return;
+
+    // Dismount GBike immediately on [E] (triggers Bail-Out Slide if moving >= 8.5 m/s!)
+    if (p.ridingGBikeId !== null) {
+      this.dismountGBike(p, true);
       return;
     }
 
-    if (nearLoot) {
-      this.pickupLoot(p, nearLoot);
+    if (p.channel) return;
+
+    const target = this.resolveNearestInteractable(p);
+    if (!target) return;
+
+    if (target.kind === 'supply_drop') {
+      const sd = target.supplyDrop;
+      if (p.silencedSec > 0) {
+        this.audio.playSilenced();
+        return;
+      }
+      if (p.sliding) {
+        this.endSlide(p, false);
+      }
+      this.cancelReload(p);
+      p.sprinting = false;
+      p.isAds = false;
+      p.channel = {
+        kind: 'supply_drop',
+        label: 'Opening Supply Drop...',
+        slotIndex: p.activeSlot,
+        supplyDropId: sd.id,
+        elapsed: 0,
+        duration: GAME_CONSTANTS.SUPPLY_DROP_CHANNEL_TIME,
+      };
+      return;
+    }
+
+    if (target.kind === 'chest') {
+      this.startChestChannel(p, target.chest);
+      return;
+    }
+
+    if (target.kind === 'loot') {
+      this.pickupLoot(p, target.loot);
+      return;
+    }
+
+    if (target.kind === 'techstop') {
+      this.tryStartTechStopUpgrade(p, target.techStop);
+      return;
+    }
+
+    if (target.kind === 'gbike') {
+      this.mountGBike(p, target.bike);
     }
   }
 
@@ -4231,7 +5080,7 @@ export class WorkspaceRoyaleEngine {
   }
 
   private startReload(c: Combatant): void {
-    if (!c.alive || c.skyDropping || c.isReloading || c.rewind.active) return;
+    if (!c.alive || c.skyDropping || c.isReloading || c.rewind.active || c.ridingGBikeId !== null) return;
     const slot = c.slots[c.activeSlot];
     if (!slot || slot.kind !== 'weapon') return;
     const wDef = WEAPONS[slot.id as WeaponId];
@@ -4272,7 +5121,7 @@ export class WorkspaceRoyaleEngine {
 
     if (slot && slot.kind === 'weapon') {
       const inst = this.assetManager.instantiateWeapon(slot.id as WeaponId, slot.rarity);
-      inst.root.visible = !c.skyDropping;
+      inst.root.visible = !c.skyDropping && c.ridingGBikeId === null;
       if (!c.castingShadow) {
         inst.root.traverse((obj) => {
           if (obj instanceof THREE.Mesh) obj.castShadow = false;
@@ -4281,7 +5130,7 @@ export class WorkspaceRoyaleEngine {
       c.hero.weaponSocket.add(inst.root);
       c.weaponInstance = inst;
       c.twoHandBlend = 1;
-      if (!c.skyDropping && c.hero.root.visible) {
+      if (!c.skyDropping && c.ridingGBikeId === null && c.hero.root.visible) {
         alignWeaponTwoHanded(inst.root, c.hero, { weaponId: inst.weaponId });
       }
     }
@@ -4380,7 +5229,18 @@ export class WorkspaceRoyaleEngine {
    */
   private undoProceduralBoneOffsets(c: Combatant): void {
     if (!c.hasProcBoneUndo) return;
-    const { spineNode, chestNode, thighLNode, shinLNode, thighRNode, shinRNode } = c.hero;
+    const {
+      spineNode,
+      chestNode,
+      thighLNode,
+      shinLNode,
+      thighRNode,
+      shinRNode,
+      upperArmLNode,
+      lowerArmLNode,
+      upperArmRNode,
+      lowerArmRNode,
+    } = c.hero;
     const u = c.procBoneUndo;
     if (spineNode) spineNode.quaternion.premultiply(u.spine).normalize();
     if (chestNode) chestNode.quaternion.premultiply(u.chest).normalize();
@@ -4388,6 +5248,10 @@ export class WorkspaceRoyaleEngine {
     if (shinLNode) shinLNode.quaternion.premultiply(u.shinL).normalize();
     if (thighRNode) thighRNode.quaternion.premultiply(u.thighR).normalize();
     if (shinRNode) shinRNode.quaternion.premultiply(u.shinR).normalize();
+    if (upperArmLNode) upperArmLNode.quaternion.premultiply(u.upperArmL).normalize();
+    if (lowerArmLNode) lowerArmLNode.quaternion.premultiply(u.lowerArmL).normalize();
+    if (upperArmRNode) upperArmRNode.quaternion.premultiply(u.upperArmR).normalize();
+    if (lowerArmRNode) lowerArmRNode.quaternion.premultiply(u.lowerArmR).normalize();
     c.hasProcBoneUndo = false;
   }
 
@@ -4427,6 +5291,161 @@ export class WorkspaceRoyaleEngine {
     // Trail leg (Right): tuck thigh & shin compactly beneath hip with knee & boot cleanly above floor
     applyAxisRot(thighRNode, -0.44 * blend);
     applyAxisRot(shinRNode, -0.46 * blend);
+  }
+
+  /**
+   * Applies calm seated bicycle rider bone offsets (recorded into procBoneUndo so dismounting
+   * restores 100% clean Blender clips with zero residual twist):
+   * - Slight forward cycling torso tuck on Spine/Chest
+   * - Alternating knee/thigh crank cadence synced to `bike.pedalSpin`
+   */
+  private solveTwoBoneIK(
+    upper: THREE.Object3D | null,
+    lower: THREE.Object3D | null,
+    end: THREE.Object3D | null,
+    targetWorld: THREE.Vector3,
+    poleDirWorld: THREE.Vector3
+  ): void {
+    if (!upper || !lower || !end || !upper.parent || !lower.parent) return;
+
+    upper.getWorldPosition(this.tmpIkA);
+    lower.getWorldPosition(this.tmpIkB);
+    end.getWorldPosition(this.tmpIkC);
+
+    const len1 = this.tmpIkA.distanceTo(this.tmpIkB);
+    const len2 = this.tmpIkB.distanceTo(this.tmpIkC);
+    if (len1 < 1e-4 || len2 < 1e-4) return;
+
+    this.tmpIkD.copy(targetWorld).sub(this.tmpIkA);
+    const rawDist = this.tmpIkD.length();
+    if (rawDist < 1e-4) return;
+    this.tmpIkD.divideScalar(rawDist);
+
+    const minReach = Math.abs(len1 - len2) + 0.015;
+    const maxReach = len1 + len2 - 0.006;
+    const d = THREE.MathUtils.clamp(rawDist, minReach, maxReach);
+    const cosAlpha = THREE.MathUtils.clamp((len1 * len1 + d * d - len2 * len2) / (2 * len1 * d), -1, 1);
+    const sinAlpha = Math.sqrt(Math.max(0, 1 - cosAlpha * cosAlpha));
+
+    // Orthogonalize pole direction against A->T
+    this.tmpIkE.copy(poleDirWorld).addScaledVector(this.tmpIkD, -poleDirWorld.dot(this.tmpIkD));
+    if (this.tmpIkE.lengthSq() < 1e-6) {
+      this.tmpIkE.set(0, 1, 0).addScaledVector(this.tmpIkD, -this.tmpIkD.y);
+      if (this.tmpIkE.lengthSq() < 1e-6) this.tmpIkE.set(1, 0, 0);
+    }
+    this.tmpIkE.normalize();
+
+    // Desired upper-segment unit direction & current upper-segment unit direction
+    this.tmpVecA
+      .copy(this.tmpIkD)
+      .multiplyScalar(cosAlpha)
+      .addScaledVector(this.tmpIkE, sinAlpha)
+      .normalize();
+    this.tmpVecB.copy(this.tmpIkB).sub(this.tmpIkA).normalize();
+
+    this.tmpQuatB.setFromUnitVectors(this.tmpVecB, this.tmpVecA);
+    upper.parent.getWorldQuaternion(this.tmpQuatA);
+    this.tmpQuatC.copy(this.tmpQuatA).invert().multiply(this.tmpQuatB).multiply(this.tmpQuatA);
+    upper.quaternion.premultiply(this.tmpQuatC).normalize();
+    upper.updateMatrixWorld(true);
+
+    // Aim lower segment directly from updated mid-joint to targetWorld
+    lower.getWorldPosition(this.tmpIkB);
+    end.getWorldPosition(this.tmpIkC);
+    this.tmpVecB.copy(this.tmpIkC).sub(this.tmpIkB).normalize();
+    this.tmpVecA.copy(targetWorld).sub(this.tmpIkB);
+    if (this.tmpVecA.lengthSq() < 1e-6) return;
+    this.tmpVecA.normalize();
+
+    this.tmpQuatB.setFromUnitVectors(this.tmpVecB, this.tmpVecA);
+    lower.parent.getWorldQuaternion(this.tmpQuatA);
+    this.tmpQuatC.copy(this.tmpQuatA).invert().multiply(this.tmpQuatB).multiply(this.tmpQuatA);
+    lower.quaternion.premultiply(this.tmpQuatC).normalize();
+    lower.updateMatrixWorld(true);
+  }
+
+  private applyGBikeRiderPose(c: Combatant, bike: WorldGBike): void {
+    const {
+      spineNode,
+      chestNode,
+      thighLNode,
+      shinLNode,
+      footLNode,
+      thighRNode,
+      shinRNode,
+      footRNode,
+      upperArmLNode,
+      lowerArmLNode,
+      leftHandNode,
+      upperArmRNode,
+      lowerArmRNode,
+      rightHandNode,
+      model,
+      root,
+    } = c.hero;
+
+    // Sync live GBike transforms first so handlebar & crank targets have zero 1-frame lag
+    this.syncGBikeVisualTransform(bike);
+    bike.visual.root.updateMatrixWorld(true);
+    root.updateMatrixWorld(true);
+
+    model.getWorldQuaternion(this.tmpQuatC);
+    this.tmpVecA.set(1, 0, 0).applyQuaternion(this.tmpQuatC).normalize();
+
+    const applyAxisRot = (node: THREE.Object3D | null, angleRad: number): void => {
+      if (!node || !node.parent || Math.abs(angleRad) < 0.0005) return;
+      node.parent.getWorldQuaternion(this.tmpQuatA).invert();
+      this.tmpVecB.copy(this.tmpVecA).applyQuaternion(this.tmpQuatA).normalize();
+      this.tmpQuatB.setFromAxisAngle(this.tmpVecB, angleRad);
+      node.quaternion.premultiply(this.tmpQuatB);
+      node.updateMatrixWorld(true);
+    };
+
+    // Lean torso comfortably forward toward handlebars while keeping head level forward
+    applyAxisRot(spineNode, -0.24);
+    applyAxisRot(chestNode, 0.12);
+
+    // Bike world orientation for pole vectors & vertical foot offset
+    bike.visual.root.getWorldQuaternion(this.tmpQuatC);
+    const bikeUpWorld = this.tmpVecC.set(0, 1, 0).applyQuaternion(this.tmpQuatC).normalize();
+
+    // 1. Lock BOTH hands onto the live steering handlebar rubber grips (GBike_FrontAssembly local (±0.292, 0.285, 0.137))
+    const frontNode = bike.visual.frontAssembly ?? bike.visual.root;
+    const isFrontChild = Boolean(bike.visual.frontAssembly);
+    const gripY = isFrontChild ? 0.285 : 1.025;
+    const gripZ = isFrontChild ? 0.137 : -0.223;
+
+    this.tmpIkTarget.set(-0.292, gripY, gripZ);
+    frontNode.localToWorld(this.tmpIkTarget);
+    this.tmpIkPole.set(-0.58, -0.45, 0.68).applyQuaternion(this.tmpQuatC).normalize();
+    this.solveTwoBoneIK(upperArmLNode, lowerArmLNode, leftHandNode, this.tmpIkTarget, this.tmpIkPole);
+
+    this.tmpIkTarget.set(+0.292, gripY, gripZ);
+    frontNode.localToWorld(this.tmpIkTarget);
+    this.tmpIkPole.set(+0.58, -0.45, 0.68).applyQuaternion(this.tmpQuatC).normalize();
+    this.solveTwoBoneIK(upperArmRNode, lowerArmRNode, rightHandNode, this.tmpIkTarget, this.tmpIkPole);
+
+    // 2. Lock BOTH feet onto the live rotating crank pedals (GBike_CrankPedals local (±0.114, ∓0.145, 0.0) + sole clearance)
+    if (bike.visual.crankPedals && footLNode && footRNode) {
+      this.tmpIkTarget.set(-0.114, -0.145, 0.0);
+      bike.visual.crankPedals.localToWorld(this.tmpIkTarget);
+      this.tmpIkTarget.addScaledVector(bikeUpWorld, 0.065);
+      this.tmpIkPole.set(-0.08, 0.14, -0.985).applyQuaternion(this.tmpQuatC).normalize();
+      this.solveTwoBoneIK(thighLNode, shinLNode, footLNode, this.tmpIkTarget, this.tmpIkPole);
+
+      this.tmpIkTarget.set(+0.114, +0.145, 0.0);
+      bike.visual.crankPedals.localToWorld(this.tmpIkTarget);
+      this.tmpIkTarget.addScaledVector(bikeUpWorld, 0.065);
+      this.tmpIkPole.set(+0.08, 0.14, -0.985).applyQuaternion(this.tmpQuatC).normalize();
+      this.solveTwoBoneIK(thighRNode, shinRNode, footRNode, this.tmpIkTarget, this.tmpIkPole);
+    } else {
+      const pedalWave = Math.sin(bike.pedalSpin);
+      const pedalingAmp = THREE.MathUtils.clamp(Math.abs(bike.speed) / 8.0, 0, 1);
+      applyAxisRot(thighLNode, 0.24 + pedalWave * 0.28 * pedalingAmp);
+      applyAxisRot(shinLNode, -0.22 - pedalWave * 0.22 * pedalingAmp);
+      applyAxisRot(thighRNode, 0.24 - pedalWave * 0.28 * pedalingAmp);
+      applyAxisRot(shinRNode, -0.22 + pedalWave * 0.22 * pedalingAmp);
+    }
   }
 
   /**
@@ -4525,8 +5544,19 @@ export class WorkspaceRoyaleEngine {
       }
     }
 
-    c.hero.root.position.copy(c.pos);
-    c.hero.root.rotation.y = c.yaw;
+    const riddenBike = c.ridingGBikeId
+      ? this.worldGBikes.find((b) => b.id === c.ridingGBikeId) ?? null
+      : null;
+
+    if (riddenBike) {
+      c.hero.root.position.set(riddenBike.x, riddenBike.y, riddenBike.z);
+      c.hero.root.rotation.order = 'YXZ';
+      c.hero.root.rotation.set(0, riddenBike.yaw, riddenBike.leanAngle);
+    } else {
+      c.hero.root.position.copy(c.pos);
+      c.hero.root.rotation.order = 'YXZ';
+      c.hero.root.rotation.set(0, c.yaw, 0);
+    }
 
     // Mid-distance bots (> 68m balanced): smooth 60 Hz transform movement, 20 Hz (every 3rd frame) skeleton + weapon IK
     if (isMidLod && !justBecameVisible) {
@@ -4554,6 +5584,9 @@ export class WorkspaceRoyaleEngine {
     let nextAnim: AnimName = hasWeapon ? 'IdleArmed' : 'Idle';
     if (c.skyDropping) {
       nextAnim = 'Glide';
+    } else if (riddenBike) {
+      // Symmetric unarmed Idle base prevents combat rifle crouch torso twist before 2-bone handlebar/pedal IK
+      nextAnim = 'Idle';
     } else if (c.isReloading && hasWeapon) {
       nextAnim = 'Reload';
     } else if (isAirborneJump) {
@@ -4573,11 +5606,13 @@ export class WorkspaceRoyaleEngine {
     // 2. Dynamic speed-matched stride (timeScale) across both unarmed & armed locomotion clips
     const runScale = THREE.MathUtils.clamp(horizSpeed / GAME_CONSTANTS.WALK_SPEED, 0.55, 1.45);
     const sprintScale = THREE.MathUtils.clamp(horizSpeed / GAME_CONSTANTS.SPRINT_SPEED, 0.55, 1.45);
-    const crouchScale = c.sliding
-      ? 0.08
-      : horizSpeed < 0.25
-        ? 0.25
-        : THREE.MathUtils.clamp(horizSpeed / GAME_CONSTANTS.CROUCH_SPEED, 0.55, 1.45);
+    const crouchScale = riddenBike
+      ? 0.04
+      : c.sliding
+        ? 0.08
+        : horizSpeed < 0.25
+          ? 0.25
+          : THREE.MathUtils.clamp(horizSpeed / GAME_CONSTANTS.CROUCH_SPEED, 0.55, 1.45);
     c.hero.actions.Run.timeScale = runScale;
     c.hero.actions.RunArmed.timeScale = runScale;
     c.hero.actions.Sprint.timeScale = sprintScale;
@@ -4630,6 +5665,16 @@ export class WorkspaceRoyaleEngine {
       c.hero.model.position.set(0, 0, 0);
       c.hero.model.rotation.x = c.glidePitch;
       c.hero.model.rotation.z = c.glideBank;
+    } else if (riddenBike) {
+      c.slidePoseBlend = 0;
+      c.leanPitch = 0;
+      c.leanBank = 0;
+      c.hero.model.scale.set(1, 1, 1);
+      // Anchor symmetric Idle pelvis (~0.92m in model space) squarely onto GBike_SeatMount (0, 0.95, 0.20)
+      const seatZ = riddenBike.visual.seatMount ? riddenBike.visual.seatMount.position.z : 0.2;
+      const seatY = riddenBike.visual.seatMount ? riddenBike.visual.seatMount.position.y - 0.90 : 0.05;
+      c.hero.model.position.set(0, seatY, seatZ);
+      c.hero.model.rotation.set(0, 0, 0);
     } else {
       const safeDt = Math.max(dt, 0.004);
       const fx = -Math.sin(c.yaw);
@@ -4717,15 +5762,27 @@ export class WorkspaceRoyaleEngine {
     this.undoProceduralBoneOffsets(c);
     c.hero.mixer.update(animDt);
 
-    // 5a/5b. Apply procedural athletic slide pose & upper-body vertical aim pitch, recording exact undo deltas
-    const hasSlideBonePose = c.slidePoseBlend > 0.001 && !c.skyDropping;
-    const trackAimPitch = hasWeapon && (aimingNow || c.crouching) && !c.skyDropping && !c.isReloading;
+    // 5a/5b. Apply procedural GBike seated pose, athletic slide pose & upper-body vertical aim pitch, recording exact undo deltas
+    const hasGBikePose = Boolean(riddenBike) && !c.skyDropping;
+    const hasSlideBonePose = !hasGBikePose && c.slidePoseBlend > 0.001 && !c.skyDropping;
+    const trackAimPitch = !hasGBikePose && hasWeapon && (aimingNow || c.crouching) && !c.skyDropping && !c.isReloading;
     const targetAimPitch = trackAimPitch ? THREE.MathUtils.clamp(c.pitch, -0.65, 0.65) : 0;
     c.smoothAimPitch += (targetAimPitch - c.smoothAimPitch) * Math.min(1, animDt * 14);
-    const hasAimPitchPose = Math.abs(c.smoothAimPitch) > 0.001;
+    const hasAimPitchPose = !hasGBikePose && Math.abs(c.smoothAimPitch) > 0.001;
 
-    if (hasSlideBonePose || hasAimPitchPose) {
-      const { spineNode, chestNode, thighLNode, shinLNode, thighRNode, shinRNode } = c.hero;
+    if (hasGBikePose || hasSlideBonePose || hasAimPitchPose) {
+      const {
+        spineNode,
+        chestNode,
+        thighLNode,
+        shinLNode,
+        thighRNode,
+        shinRNode,
+        upperArmLNode,
+        lowerArmLNode,
+        upperArmRNode,
+        lowerArmRNode,
+      } = c.hero;
       const pre = this.tmpPreBoneQuats;
       if (spineNode) pre.spine.copy(spineNode.quaternion);
       if (chestNode) pre.chest.copy(chestNode.quaternion);
@@ -4733,12 +5790,20 @@ export class WorkspaceRoyaleEngine {
       if (shinLNode) pre.shinL.copy(shinLNode.quaternion);
       if (thighRNode) pre.thighR.copy(thighRNode.quaternion);
       if (shinRNode) pre.shinR.copy(shinRNode.quaternion);
+      if (upperArmLNode) pre.upperArmL.copy(upperArmLNode.quaternion);
+      if (lowerArmLNode) pre.lowerArmL.copy(lowerArmLNode.quaternion);
+      if (upperArmRNode) pre.upperArmR.copy(upperArmRNode.quaternion);
+      if (lowerArmRNode) pre.lowerArmR.copy(lowerArmRNode.quaternion);
 
-      if (hasSlideBonePose) {
-        this.applySlideBonePose(c, c.slidePoseBlend);
-      }
-      if (hasAimPitchPose) {
-        this.applyUpperBodyAimPitch(c, c.smoothAimPitch);
+      if (hasGBikePose && riddenBike) {
+        this.applyGBikeRiderPose(c, riddenBike);
+      } else {
+        if (hasSlideBonePose) {
+          this.applySlideBonePose(c, c.slidePoseBlend);
+        }
+        if (hasAimPitchPose) {
+          this.applyUpperBodyAimPitch(c, c.smoothAimPitch);
+        }
       }
 
       // Compute exact undo delta R = Q_pre * inv(Q_post) so R * Q_post === Q_pre before next mixer.update()
@@ -4756,6 +5821,10 @@ export class WorkspaceRoyaleEngine {
       storeUndo(shinLNode, pre.shinL, u.shinL);
       storeUndo(thighRNode, pre.thighR, u.thighR);
       storeUndo(shinRNode, pre.shinR, u.shinR);
+      storeUndo(upperArmLNode, pre.upperArmL, u.upperArmL);
+      storeUndo(lowerArmLNode, pre.lowerArmL, u.lowerArmL);
+      storeUndo(upperArmRNode, pre.upperArmR, u.upperArmR);
+      storeUndo(lowerArmRNode, pre.lowerArmR, u.lowerArmR);
       c.hasProcBoneUndo = true;
     }
 
@@ -4765,7 +5834,7 @@ export class WorkspaceRoyaleEngine {
     }
 
     // 7. Two-handed Hand_R (WeaponSocket_R) -> Hand_L barrel alignment with smooth Reload mag-swap handoff
-    if (c.weaponInstance && !c.skyDropping) {
+    if (c.weaponInstance && !c.skyDropping && !riddenBike) {
       if (nextAnim === 'Reload') {
         // Exact Reload beat handoff matching build_characters.py 48f Reload:
         //   t ∈ [0.00, 0.04]: Beat 0 (two-handed Aim grip, weight = 1)
@@ -4914,6 +5983,9 @@ export class WorkspaceRoyaleEngine {
 
   private updateCamera(dt: number): void {
     if (!this.player) return;
+    const riddenBike = this.player.ridingGBikeId
+      ? this.worldGBikes.find((b) => b.id === this.player?.ridingGBikeId) ?? null
+      : null;
     this.camController.update({
       dt,
       playerPos: this.player.pos,
@@ -4921,6 +5993,8 @@ export class WorkspaceRoyaleEngine {
       pitch: this.player.pitch,
       crouching: this.player.crouching,
       sliding: this.player.sliding,
+      ridingGBike: Boolean(riddenBike),
+      gbikeLean: riddenBike ? riddenBike.leanAngle : 0,
       sprinting: this.player.sprinting,
       isAds: this.player.isAds,
       sniperScope: this.isPlayerSniperScoped(),
@@ -4931,6 +6005,131 @@ export class WorkspaceRoyaleEngine {
         return hit ? hit.distance : maxDist;
       },
     });
+  }
+
+  // =========================================================================
+  // SPATIAL STEREO PANNING & VISUAL SOUND COMPASS CUE TRACKER
+  // =========================================================================
+
+  private computeSpatialPan(sourcePos: THREE.Vector3): number {
+    const p = this.player;
+    if (!p) return 0;
+    const dx = sourcePos.x - p.pos.x;
+    const dz = sourcePos.z - p.pos.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 1.0) return 0;
+    const rx = Math.cos(p.yaw);
+    const rz = -Math.sin(p.yaw);
+    return THREE.MathUtils.clamp((dx * rx + dz * rz) / Math.max(dist, 0.5), -0.92, 0.92);
+  }
+
+  private pushSoundEvent(
+    kind: SoundCueKind,
+    x: number,
+    z: number,
+    maxRange: number,
+    ttl: number,
+    weight: number
+  ): void {
+    if (this.soundEvents.length >= 64) {
+      this.soundEvents.shift();
+    }
+    this.soundEvents.push({ kind, x, z, maxRange, age: 0, ttl, weight });
+  }
+
+  private updateSoundEvents(dt: number): void {
+    for (let i = this.soundEvents.length - 1; i >= 0; i--) {
+      const ev = this.soundEvents[i];
+      ev.age += dt;
+      if (ev.age >= ev.ttl) {
+        this.soundEvents.splice(i, 1);
+      }
+    }
+  }
+
+  private computeSoundCompassCues(p: Combatant | null): SoundCompassCue[] {
+    if (!p || !p.alive || p.skyDropping || this.matchPhase !== 'playing') {
+      return [];
+    }
+
+    const fx = -Math.sin(p.yaw);
+    const fz = -Math.cos(p.yaw);
+    const rx = Math.cos(p.yaw);
+    const rz = -Math.sin(p.yaw);
+
+    const raw: SoundCompassCue[] = [];
+
+    // 1. Transient combat, footstep & GBike sound events
+    for (let i = 0; i < this.soundEvents.length; i++) {
+      const ev = this.soundEvents[i];
+      const dx = ev.x - p.pos.x;
+      const dz = ev.z - p.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > ev.maxRange || dist < 0.25) continue;
+      const fade = Math.max(0, 1 - ev.age / Math.max(ev.ttl, 0.05));
+      const intensity = THREE.MathUtils.clamp((1 - dist / ev.maxRange) * ev.weight * fade, 0.12, 1.0);
+      const bearingRad = Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz);
+      raw.push({ kind: ev.kind, bearingRad, intensity });
+    }
+
+    // 2. Live proximity cues for unopened Tier 3 Epic Vault Chests within 34m (top 2 closest keep ring ultra-clean)
+    const nearbyChests: { dist: number; bearingRad: number; intensity: number }[] = [];
+    for (let i = 0; i < this.lootChests.length; i++) {
+      const ch = this.lootChests[i];
+      if (ch.opened || ch.tier !== 3) continue;
+      const dx = ch.x - p.pos.x;
+      const dy = ch.y - p.pos.y;
+      const dz = ch.z - p.pos.z;
+      const dist = Math.hypot(dx, dy, dz);
+      if (dist > 34 || dist < 0.4) continue;
+      const intensity = THREE.MathUtils.clamp((1 - dist / 34) * 0.68, 0.14, 0.72);
+      const bearingRad = Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz);
+      nearbyChests.push({ dist, bearingRad, intensity });
+    }
+    nearbyChests.sort((a, b) => a.dist - b.dist);
+    for (let i = 0; i < Math.min(2, nearbyChests.length); i++) {
+      const c = nearbyChests[i];
+      raw.push({ kind: 'chest', bearingRad: c.bearingRad, intensity: c.intensity });
+    }
+
+    // 3. Live proximity cues for landed unopened Epic Supply Drops within 65m
+    for (let i = 0; i < this.supplyDrops.length; i++) {
+      const sd = this.supplyDrops[i];
+      if (!sd.landed || sd.opened) continue;
+      const dx = sd.x - p.pos.x;
+      const dz = sd.z - p.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 65 || dist < 0.4) continue;
+      const intensity = THREE.MathUtils.clamp((1 - dist / 65) * 0.85, 0.12, 1.0);
+      const bearingRad = Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz);
+      raw.push({ kind: 'supply_drop', bearingRad, intensity });
+    }
+
+    if (raw.length === 0) return [];
+
+    // Sort strongest first, deduplicate/cluster cues of same kind within 0.28 rad (~16°), cap top 10
+    raw.sort((a, b) => b.intensity - a.intensity);
+    const clustered: SoundCompassCue[] = [];
+    for (let i = 0; i < raw.length; i++) {
+      const cand = raw[i];
+      let merged = false;
+      for (let j = 0; j < clustered.length; j++) {
+        const existing = clustered[j];
+        if (existing.kind !== cand.kind) continue;
+        let diff = Math.abs(existing.bearingRad - cand.bearingRad);
+        if (diff > Math.PI) diff = Math.PI * 2 - diff;
+        if (diff < 0.28) {
+          merged = true;
+          break;
+        }
+      }
+      if (!merged) {
+        clustered.push(cand);
+        if (clustered.length >= 10) break;
+      }
+    }
+
+    return clustered;
   }
 
   private projectWorldToScreen(worldPos: THREE.Vector3): { x: number; y: number } | null {
@@ -4963,45 +6162,17 @@ export class WorkspaceRoyaleEngine {
     const groundY = p ? this.physics.getSupportHeight(p.pos.x, p.pos.z, p.pos.y, 0.42, 0.65) : 0;
     const altitude = p ? Math.max(0, Math.round(p.pos.y - groundY)) : 0;
 
-    // Context interact prompt ([E]) — Supply Drops, Unopened Loot Chests, & Popped Loot
+    // Context interact prompt ([E]) — Supply Drops, Unopened Loot Chests, Popped Loot, TechStops, & Rideable GBikes
     let interactPrompt: string | null = null;
-    if (p && p.alive && !p.skyDropping && !p.channel) {
-      const sd = this.supplyDrops.find(
-        (d) =>
-          d.landed &&
-          !d.opened &&
-          Math.hypot(d.x - p.pos.x, d.z - p.pos.z) <= 3.8 &&
-          Math.abs(d.y - p.pos.y) <= 2.5
-      );
-      if (sd) {
-        interactPrompt = '[E] Open Epic Supply Drop (1.5s)';
-      } else {
-        const nearChest = this.findNearestUnopenedChest(p, GAME_CONSTANTS.CHEST_INTERACT_RADIUS);
-        const nearLoot = this.findNearestLoot(p, 3.4);
-
-        const formatLootPrompt = (loot: GroundLoot): string => {
-          const rLabel = RARITY_CONFIG[loot.rarity].label;
-          const itemName =
-            loot.kind === 'weapon'
-              ? WEAPONS[loot.itemId as WeaponId].name
-              : UTILITY_ITEMS[loot.itemId as UtilityItemId].name;
-          return `[E] Pick up ${rLabel} ${itemName}`;
-        };
-
-        if (nearChest && nearLoot) {
-          const chestDist = Math.hypot(nearChest.x - p.pos.x, nearChest.z - p.pos.z);
-          const lootDist = Math.hypot(nearLoot.x - p.pos.x, nearLoot.z - p.pos.z);
-          interactPrompt =
-            lootDist + 0.35 < chestDist
-              ? formatLootPrompt(nearLoot)
-              : this.getChestPromptText(nearChest.tier);
-        } else if (nearChest) {
-          interactPrompt = this.getChestPromptText(nearChest.tier);
-        } else if (nearLoot) {
-          interactPrompt = formatLootPrompt(nearLoot);
-        }
-      }
+    if (p && p.alive && !p.skyDropping && !p.channel && p.ridingGBikeId === null) {
+      const target = this.resolveNearestInteractable(p);
+      interactPrompt = target ? target.prompt : null;
     }
+
+    const riddenBike =
+      p && p.ridingGBikeId
+        ? this.worldGBikes.find((b) => b.id === p.ridingGBikeId) ?? null
+        : null;
 
     // Dynamic crosshair spread in screen pixels
     const activeSlotObj = p ? p.slots[p.activeSlot] : null;
@@ -5122,6 +6293,8 @@ export class WorkspaceRoyaleEngine {
       status: {
         crouching: p?.crouching ?? false,
         sliding: p?.sliding ?? false,
+        ridingGBike: Boolean(riddenBike),
+        gbikeSpeedKmh: riddenBike ? Math.abs(riddenBike.speed) * 3.6 : 0,
         silencedSec: p?.silencedSec ?? 0,
         hastedSec: p?.hastedSec ?? 0,
         slowedSec: p?.slowedSec ?? 0,
@@ -5132,6 +6305,7 @@ export class WorkspaceRoyaleEngine {
         altitude,
       },
       supplyDropBearings,
+      soundCues: this.computeSoundCompassCues(p),
       waypointBearingRad,
       waypointDist,
       pointerLocked: this.pointerLocked,
@@ -5188,6 +6362,18 @@ export class WorkspaceRoyaleEngine {
       opened: s.opened,
     }));
 
+    const gbikes: MinimapGBike[] = this.worldGBikes.map((b) => ({
+      x: b.x,
+      z: b.z,
+      occupied: b.riderId !== null,
+    }));
+
+    const techStops: MinimapTechStop[] = (this.world?.techStops ?? []).map((ts) => ({
+      x: ts.x,
+      z: ts.z,
+      name: ts.name,
+    }));
+
     return {
       playerX: px,
       playerZ: pz,
@@ -5202,6 +6388,8 @@ export class WorkspaceRoyaleEngine {
       loot,
       chests,
       supplyDrops,
+      gbikes,
+      techStops,
       landmarks: this.world?.landmarks ?? [],
       revealedAll,
       waypoint: this.waypoint ? { x: this.waypoint.x, z: this.waypoint.z } : null,
@@ -5242,7 +6430,12 @@ export class WorkspaceRoyaleEngine {
     else if (e.code === 'KeyE') this.tryPlayerInteract();
     else if (e.code === 'KeyQ') this.tryCastUltimate(p);
     else if (e.code === 'KeyC' && !p.skyDropping && !p.rewind.active) {
-      if (p.sliding) {
+      if (p.ridingGBikeId !== null) {
+        const bike = this.worldGBikes.find((b) => b.id === p.ridingGBikeId);
+        if (bike && Math.abs(bike.speed) >= GAME_CONSTANTS.GBIKE_BAIL_SLIDE_MIN_SPEED) {
+          this.dismountGBike(p, true);
+        }
+      } else if (p.sliding) {
         if (p.slideElapsed >= 0.15) {
           this.endSlide(p, false);
         }
@@ -5251,7 +6444,7 @@ export class WorkspaceRoyaleEngine {
           this.crouchToggled = !this.crouchToggled;
         }
       }
-    } else if (e.code === 'ControlLeft' && !p.skyDropping && !p.rewind.active) {
+    } else if (e.code === 'ControlLeft' && !p.skyDropping && !p.rewind.active && p.ridingGBikeId === null) {
       if (!p.sliding && !this.isHealOrShieldChannel(p.channel) && p.grounded) {
         this.ctrlSlideConsumed = true;
         this.tryStartSlide(p, true);
@@ -5293,6 +6486,9 @@ export class WorkspaceRoyaleEngine {
       this.mouseLeftDown = true;
       this.ifPlayerExists((p) => {
         p.semiAutoLatch = false;
+        if (p.ridingGBikeId !== null) {
+          this.tryRingGBikeBell(p);
+        }
       });
     } else if (e.button === 2) {
       this.mouseRightDown = true;

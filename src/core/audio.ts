@@ -87,17 +87,35 @@ export class SoundEngine {
     return t * t;
   }
 
+  private createPanDestination(ctx: AudioContext, pan: number, startTime: number): AudioNode | null {
+    if (!this.masterGain) return null;
+    if (!Number.isFinite(pan) || pan === 0 || typeof ctx.createStereoPanner !== 'function') {
+      return this.masterGain;
+    }
+    const clamped = Math.max(-0.92, Math.min(0.92, pan));
+    if (Math.abs(clamped) < 0.005) {
+      return this.masterGain;
+    }
+    const panner = ctx.createStereoPanner();
+    panner.pan.setValueAtTime(clamped, Math.max(ctx.currentTime, startTime));
+    panner.connect(this.masterGain);
+    return panner;
+  }
+
   private playTone(
     type: OscillatorType,
     startFreq: number,
     endFreq: number,
     duration: number,
     gainPeak: number,
-    delay = 0
+    delay = 0,
+    pan = 0
   ): void {
     const ctx = this.ensureContext();
     if (!ctx || !this.masterGain || gainPeak <= 0.001) return;
     const now = ctx.currentTime + delay;
+    const dest = this.createPanDestination(ctx, pan, now);
+    if (!dest) return;
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
     osc.type = type;
@@ -107,7 +125,16 @@ export class SoundEngine {
     g.gain.linearRampToValueAtTime(gainPeak, now + Math.min(0.012, duration * 0.25));
     g.gain.exponentialRampToValueAtTime(0.0001, now + duration);
     osc.connect(g);
-    g.connect(this.masterGain);
+    g.connect(dest);
+    if (dest !== this.masterGain) {
+      osc.onended = () => {
+        try {
+          dest.disconnect();
+        } catch {
+          // ignore disconnect race
+        }
+      };
+    }
     osc.start(now);
     osc.stop(now + duration + 0.02);
   }
@@ -119,11 +146,14 @@ export class SoundEngine {
     q: number,
     duration: number,
     gainPeak: number,
-    delay = 0
+    delay = 0,
+    pan = 0
   ): void {
     const ctx = this.ensureContext();
     if (!ctx || !this.masterGain || !this.noiseBuffer || gainPeak <= 0.001) return;
     const now = ctx.currentTime + delay;
+    const dest = this.createPanDestination(ctx, pan, now);
+    if (!dest) return;
     const src = ctx.createBufferSource();
     src.buffer = this.noiseBuffer;
 
@@ -140,45 +170,54 @@ export class SoundEngine {
 
     src.connect(filter);
     filter.connect(g);
-    g.connect(this.masterGain);
+    g.connect(dest);
+    if (dest !== this.masterGain) {
+      src.onended = () => {
+        try {
+          dest.disconnect();
+        } catch {
+          // ignore disconnect race
+        }
+      };
+    }
     src.start(now, Math.random() * 0.8);
     src.stop(now + duration + 0.03);
   }
 
-  public playShot(weaponId: WeaponId, distance = 0): void {
+  public playShot(weaponId: WeaponId, distance = 0, pan = 0): void {
     const atten = this.spatialGain(distance, weaponId === 'longbow_308' ? 190 : 125);
     if (atten <= 0.015) return;
 
     switch (weaponId) {
       case 'vanguard_m4':
         // Crisp 5.56mm carbine snap + tight low punch
-        this.playNoise('bandpass', 2400, 680, 1.1, 0.11, 0.42 * atten);
-        this.playTone('triangle', 210, 58, 0.09, 0.34 * atten);
-        this.playTone('sawtooth', 980, 260, 0.04, 0.12 * atten);
+        this.playNoise('bandpass', 2400, 680, 1.1, 0.11, 0.42 * atten, 0, pan);
+        this.playTone('triangle', 210, 58, 0.09, 0.34 * atten, 0, pan);
+        this.playTone('sawtooth', 980, 260, 0.04, 0.12 * atten, 0, pan);
         break;
       case 'breaker_12g':
         // Thunderous 12-gauge blast + mechanical forend tail
-        this.playNoise('lowpass', 1900, 240, 0.7, 0.24, 0.68 * atten);
-        this.playTone('sine', 135, 34, 0.22, 0.62 * atten);
-        this.playNoise('highpass', 1800, 900, 1.5, 0.06, 0.16 * atten, 0.12);
+        this.playNoise('lowpass', 1900, 240, 0.7, 0.24, 0.68 * atten, 0, pan);
+        this.playTone('sine', 135, 34, 0.22, 0.62 * atten, 0, pan);
+        this.playNoise('highpass', 1800, 900, 1.5, 0.06, 0.16 * atten, 0.12, pan);
         break;
       case 'vector_9':
         // Ultra-fast high-RPM PDW crack
-        this.playNoise('bandpass', 3200, 1100, 1.4, 0.065, 0.3 * atten);
-        this.playTone('square', 360, 120, 0.05, 0.18 * atten);
+        this.playNoise('bandpass', 3200, 1100, 1.4, 0.065, 0.3 * atten, 0, pan);
+        this.playTone('square', 360, 120, 0.05, 0.18 * atten, 0, pan);
         break;
       case 'longbow_308':
         // Supersonic .308 sniper crack + deep atmospheric tail
-        this.playNoise('highpass', 3600, 820, 0.9, 0.09, 0.56 * atten);
-        this.playNoise('lowpass', 1400, 180, 0.6, 0.46, 0.48 * atten, 0.02);
-        this.playTone('sawtooth', 260, 42, 0.28, 0.5 * atten);
-        this.playTone('triangle', 1450, 920, 0.06, 0.1 * atten, 0.34);
+        this.playNoise('highpass', 3600, 820, 0.9, 0.09, 0.56 * atten, 0, pan);
+        this.playNoise('lowpass', 1400, 180, 0.6, 0.46, 0.48 * atten, 0.02, pan);
+        this.playTone('sawtooth', 260, 42, 0.28, 0.5 * atten, 0, pan);
+        this.playTone('triangle', 1450, 920, 0.06, 0.1 * atten, 0.34, pan);
         break;
       case 'nova_gl40':
         // Hollow pneumatic grenade launch "thoomp" + Mana plasma whine
-        this.playTone('sine', 155, 48, 0.22, 0.56 * atten);
-        this.playNoise('bandpass', 800, 260, 1.8, 0.18, 0.36 * atten);
-        this.playTone('sine', 620, 1180, 0.16, 0.16 * atten);
+        this.playTone('sine', 155, 48, 0.22, 0.56 * atten, 0, pan);
+        this.playNoise('bandpass', 800, 260, 1.8, 0.18, 0.36 * atten, 0, pan);
+        this.playTone('sine', 620, 1180, 0.16, 0.16 * atten, 0, pan);
         break;
     }
   }
@@ -216,14 +255,31 @@ export class SoundEngine {
     }
   }
 
-  public playShieldCrack(distance = 0): void {
-    const atten = this.spatialGain(distance, 60);
-    if (atten <= 0.02) return;
-    // Crystalline glass-energy shatter
-    this.playNoise('highpass', 4600, 1400, 1.4, 0.26, 0.36 * atten);
-    this.playTone('sine', 1640, 620, 0.18, 0.26 * atten, 0);
-    this.playTone('triangle', 2240, 880, 0.2, 0.2 * atten, 0.03);
-    this.playTone('sine', 1240, 380, 0.24, 0.22 * atten, 0.06);
+  /**
+   * Unmistakable 4-layer crystalline shield shatter SFX.
+   * When isDirect === true (player broke an enemy's shield or player's own shield shattered),
+   * plays at full punchy gain regardless of distance.
+   */
+  public playShieldCrack(distance = 0, isDirect = false, pan = 0): void {
+    const atten = isDirect ? 1.0 : this.spatialGain(distance, 85);
+    if (atten <= 0.015) return;
+
+    // 1. Crisp high-frequency glass shatter bursts (staggered micro-crackles at 0ms, 26ms, 58ms)
+    this.playNoise('highpass', 5200, 1600, 1.35, 0.24, 0.44 * atten, 0, pan);
+    this.playNoise('highpass', 4800, 1850, 1.8, 0.14, 0.34 * atten, 0.026, pan);
+    this.playNoise('highpass', 5400, 2100, 2.1, 0.12, 0.26 * atten, 0.058, pan);
+
+    // 2. Electric shield power-down sweep
+    this.playTone('triangle', 2650, 700, 0.24, 0.3 * atten, 0.006, pan);
+    this.playTone('sine', 1820, 420, 0.28, 0.28 * atten, 0.014, pan);
+
+    // 3. Punchy low-end pop so cracking a shield hits hard
+    this.playTone('sine', 195, 52, 0.18, 0.48 * atten, 0, pan);
+
+    // 4. Sparkling glass-shard tinkle chimes (staggered 20–85ms)
+    this.playTone('sine', 3400, 3240, 0.11, 0.16 * atten, 0.02, pan);
+    this.playTone('sine', 4180, 3960, 0.12, 0.14 * atten, 0.052, pan);
+    this.playTone('sine', 4920, 4680, 0.13, 0.12 * atten, 0.085, pan);
   }
 
   public playElimination(isPlayerKill = true): void {
@@ -236,12 +292,12 @@ export class SoundEngine {
     }
   }
 
-  public playExplosion(distance = 0): void {
+  public playExplosion(distance = 0, pan = 0): void {
     const atten = this.spatialGain(distance, 150);
     if (atten <= 0.015) return;
-    this.playTone('sine', 110, 24, 0.52, 0.72 * atten);
-    this.playNoise('lowpass', 1250, 140, 0.65, 0.62, 0.64 * atten);
-    this.playNoise('bandpass', 2400, 420, 1.0, 0.22, 0.28 * atten, 0.02);
+    this.playTone('sine', 110, 24, 0.52, 0.72 * atten, 0, pan);
+    this.playNoise('lowpass', 1250, 140, 0.65, 0.62, 0.64 * atten, 0, pan);
+    this.playNoise('bandpass', 2400, 420, 1.0, 0.22, 0.28 * atten, 0.02, pan);
   }
 
   public playPickup(rarity: Rarity = 'common'): void {
@@ -282,8 +338,16 @@ export class SoundEngine {
     }
   }
 
-  public playFootstep(sprinting: boolean, crouching: boolean, surface: 'grass' | 'stone' | 'sand' | 'metal' = 'stone'): void {
-    const vol = crouching ? 0.04 : sprinting ? 0.13 : 0.08;
+  public playFootstep(
+    sprinting: boolean,
+    crouching: boolean,
+    surface: 'grass' | 'stone' | 'sand' | 'metal' = 'stone',
+    distance = 0,
+    pan = 0
+  ): void {
+    const atten = distance > 0 ? this.spatialGain(distance, 34) : 1.0;
+    if (atten <= 0.015) return;
+    const vol = (crouching ? 0.04 : sprinting ? 0.13 : 0.08) * atten;
     const freq =
       surface === 'metal'
         ? 1600
@@ -292,8 +356,83 @@ export class SoundEngine {
           : surface === 'sand'
             ? 650
             : 520;
-    this.playNoise('bandpass', freq, freq * 0.45, 1.4, 0.055, vol);
-    this.playTone('sine', 110, 55, 0.045, vol * 0.7);
+    this.playNoise('bandpass', freq, freq * 0.45, 1.4, 0.055, vol, 0, pan);
+    this.playTone('sine', 110, 55, 0.045, vol * 0.7, 0, pan);
+  }
+
+  /** Iconic bright cheerful double metallic GBike bell: "BRING-BRING!" */
+  public playGBikeBell(distance = 0, pan = 0): void {
+    const atten = this.spatialGain(distance, 72);
+    if (atten <= 0.015) return;
+
+    const ring = (delay: number, durScale: number, gainScale: number): void => {
+      // Twin inharmonic metallic brass-bell partials (2480 Hz + 3760 Hz + 5120 Hz)
+      this.playTone('sine', 2480, 2472, 0.24 * durScale, 0.28 * gainScale * atten, delay, pan);
+      this.playTone('sine', 3760, 3748, 0.19 * durScale, 0.17 * gainScale * atten, delay, pan);
+      this.playTone('sine', 5120, 5100, 0.14 * durScale, 0.11 * gainScale * atten, delay, pan);
+      // Crisp striker click on thumb flick
+      this.playNoise('highpass', 5600, 3200, 3.0, 0.018, 0.11 * gainScale * atten, delay, pan);
+    };
+
+    ring(0, 0.92, 0.94);
+    ring(0.115, 1.38, 1.08);
+  }
+
+  /** Crisp mechanical spring clack + brief chain click when mounting or dismounting a GBike. */
+  public playGBikeMount(mounting: boolean): void {
+    if (mounting) {
+      this.playTone('triangle', 340, 560, 0.085, 0.22, 0);
+      this.playNoise('bandpass', 2400, 1500, 2.8, 0.045, 0.15, 0.01);
+      this.playTone('square', 1120, 860, 0.032, 0.09, 0.055);
+      this.playNoise('highpass', 3600, 2200, 3.2, 0.03, 0.1, 0.055);
+    } else {
+      this.playTone('triangle', 480, 280, 0.09, 0.2, 0);
+      this.playNoise('bandpass', 1900, 980, 2.4, 0.05, 0.14, 0.01);
+      this.playTone('square', 840, 580, 0.035, 0.08, 0.06);
+      this.playNoise('highpass', 3000, 1700, 3.0, 0.03, 0.09, 0.06);
+    }
+  }
+
+  /** Subtle soft bicycle tire hum + delicate freewheel/pedal tick while riding a GBike. */
+  public playGBikeRollTick(speedRatio: number): void {
+    const r = Math.max(0.08, Math.min(1.5, Number.isFinite(speedRatio) ? speedRatio : 0));
+    this.playNoise('bandpass', 340 + r * 280, 260 + r * 210, 1.6, 0.085, 0.042 + r * 0.034, 0);
+    this.playTone('triangle', 1280 + r * 360, 920 + r * 240, 0.022, 0.03 + r * 0.022, 0);
+    this.playNoise('highpass', 3800 + r * 600, 2400, 3.5, 0.016, 0.024 + r * 0.018, 0.008);
+  }
+
+  /** Futuristic ascending Google-chime arpeggio when upgrading a weapon at a TechStop. */
+  public playTechStopUpgrade(newRarity: Rarity): void {
+    if (newRarity === 'epic') {
+      // Triumphant 4-note shimmering chord: D5 - F#5 - A5 - D6 + sparkling high-pass chime sweep
+      this.playNoise('highpass', 1600, 5400, 1.8, 0.36, 0.17, 0.03);
+      this.playTone('triangle', 587.33, 591, 0.2, 0.24, 0);
+      this.playTone('sine', 1174.66, 1180, 0.18, 0.1, 0);
+      this.playTone('triangle', 739.99, 744, 0.22, 0.25, 0.08);
+      this.playTone('sine', 1479.98, 1488, 0.2, 0.11, 0.08);
+      this.playTone('triangle', 880.0, 886, 0.26, 0.26, 0.16);
+      this.playTone('sine', 1760.0, 1772, 0.24, 0.12, 0.16);
+      this.playTone('sine', 1174.66, 1186, 0.44, 0.3, 0.24);
+      this.playTone('triangle', 2349.32, 2368, 0.36, 0.15, 0.24);
+      this.playTone('sine', 2959.96, 2980, 0.24, 0.09, 0.31);
+      return;
+    }
+
+    if (newRarity === 'rare') {
+      // Bright 3-note electric-blue synth chord: C5 - E5 - G5
+      this.playNoise('bandpass', 1200, 3400, 2.2, 0.16, 0.13, 0);
+      this.playTone('triangle', 523.25, 526, 0.18, 0.23, 0.02);
+      this.playTone('sine', 1046.5, 1052, 0.16, 0.1, 0.02);
+      this.playTone('triangle', 659.25, 663, 0.2, 0.24, 0.1);
+      this.playTone('sine', 1318.5, 1325, 0.18, 0.11, 0.1);
+      this.playTone('sine', 783.99, 790, 0.34, 0.27, 0.18);
+      this.playTone('triangle', 1567.98, 1580, 0.28, 0.13, 0.18);
+      return;
+    }
+
+    // Fallback chime for common
+    this.playTone('triangle', 440, 444, 0.16, 0.2, 0);
+    this.playTone('sine', 554.37, 560, 0.22, 0.22, 0.08);
   }
 
   public playLanding(hard = false): void {
@@ -383,41 +522,41 @@ export class SoundEngine {
     this.playTone('sine', 1046.5, 1318.5, 0.35, 0.26, 0.28);
   }
 
-  public playChestOpenStart(distance = 0): void {
+  public playChestOpenStart(distance = 0, pan = 0): void {
     const atten = this.spatialGain(distance, 38);
     if (atten <= 0.02) return;
     // Crisp metallic latch unclip + ascending pneumatic unlock whine
-    this.playNoise('bandpass', 2600, 1400, 2.8, 0.06, 0.18 * atten, 0);
-    this.playTone('square', 380, 520, 0.05, 0.09 * atten, 0);
-    this.playTone('sine', 310, 620, 0.34, 0.14 * atten, 0.05);
-    this.playNoise('bandpass', 900, 2100, 1.8, 0.28, 0.09 * atten, 0.08);
+    this.playNoise('bandpass', 2600, 1400, 2.8, 0.06, 0.18 * atten, 0, pan);
+    this.playTone('square', 380, 520, 0.05, 0.09 * atten, 0, pan);
+    this.playTone('sine', 310, 620, 0.34, 0.14 * atten, 0.05, pan);
+    this.playNoise('bandpass', 900, 2100, 1.8, 0.28, 0.09 * atten, 0.08, pan);
   }
 
-  public playChestOpenComplete(tier: ChestTier, distance = 0): void {
+  public playChestOpenComplete(tier: ChestTier, distance = 0, pan = 0): void {
     const atten = this.spatialGain(distance, 50);
     if (atten <= 0.02) return;
     // Hydraulic lid pop + tier-escalating triumphant chime
-    this.playNoise('bandpass', 1700, 520, 1.4, 0.18, 0.24 * atten, 0);
-    this.playTone('sine', 180, 95, 0.11, 0.2 * atten, 0);
+    this.playNoise('bandpass', 1700, 520, 1.4, 0.18, 0.24 * atten, 0, pan);
+    this.playTone('sine', 180, 95, 0.11, 0.2 * atten, 0, pan);
 
     if (tier === 1) {
-      this.playTone('triangle', 440, 445, 0.14, 0.2 * atten, 0.04);
-      this.playTone('triangle', 554.37, 560, 0.22, 0.22 * atten, 0.11);
+      this.playTone('triangle', 440, 445, 0.14, 0.2 * atten, 0.04, pan);
+      this.playTone('triangle', 554.37, 560, 0.22, 0.22 * atten, 0.11, pan);
     } else if (tier === 2) {
-      this.playTone('triangle', 523.25, 528, 0.14, 0.22 * atten, 0.04);
-      this.playTone('triangle', 659.25, 664, 0.16, 0.22 * atten, 0.1);
-      this.playTone('sine', 783.99, 792, 0.28, 0.24 * atten, 0.17);
+      this.playTone('triangle', 523.25, 528, 0.14, 0.22 * atten, 0.04, pan);
+      this.playTone('triangle', 659.25, 664, 0.16, 0.22 * atten, 0.1, pan);
+      this.playTone('sine', 783.99, 792, 0.28, 0.24 * atten, 0.17, pan);
     } else {
       // Tier 3 Epic Vault: shimmering major-9th arpeggio + crystalline sparkle
-      this.playTone('triangle', 523.25, 526, 0.14, 0.22 * atten, 0.03);
-      this.playTone('triangle', 659.25, 663, 0.16, 0.23 * atten, 0.09);
-      this.playTone('sine', 783.99, 789, 0.18, 0.24 * atten, 0.15);
-      this.playTone('sine', 1046.5, 1060, 0.34, 0.26 * atten, 0.21);
-      this.playTone('sine', 1174.66, 1190, 0.36, 0.18 * atten, 0.26);
+      this.playTone('triangle', 523.25, 526, 0.14, 0.22 * atten, 0.03, pan);
+      this.playTone('triangle', 659.25, 663, 0.16, 0.23 * atten, 0.09, pan);
+      this.playTone('sine', 783.99, 789, 0.18, 0.24 * atten, 0.15, pan);
+      this.playTone('sine', 1046.5, 1060, 0.34, 0.26 * atten, 0.21, pan);
+      this.playTone('sine', 1174.66, 1190, 0.36, 0.18 * atten, 0.26, pan);
     }
   }
 
-  public playUltimate(heroId: ProductHeroId, distance = 0): void {
+  public playUltimate(heroId: ProductHeroId, distance = 0, pan = 0): void {
     const atten = this.spatialGain(distance, 140);
     if (atten <= 0.02) return;
 
@@ -425,43 +564,43 @@ export class SoundEngine {
       case 'gmail':
         // Reply-All Barrage: rapid 6-pip notification burst + rocket launch whoosh
         for (let i = 0; i < 6; i++) {
-          this.playTone('triangle', 620 + i * 85, 860 + i * 95, 0.075, 0.2 * atten, i * 0.045);
+          this.playTone('triangle', 620 + i * 85, 860 + i * 95, 0.075, 0.2 * atten, i * 0.045, pan);
         }
-        this.playNoise('bandpass', 1600, 520, 1.1, 0.42, 0.32 * atten, 0.05);
+        this.playNoise('bandpass', 1600, 520, 1.1, 0.42, 0.32 * atten, 0.05, pan);
         break;
       case 'drive':
         // Access Revoked: authoritative guardrail lockdown bass + barrier resonance
-        this.playTone('sawtooth', 165, 92, 0.38, 0.36 * atten, 0);
-        this.playTone('square', 330, 220, 0.16, 0.2 * atten, 0.06);
-        this.playTone('sine', 740, 1180, 0.45, 0.26 * atten, 0.12);
-        this.playNoise('highpass', 2200, 760, 1.8, 0.34, 0.24 * atten, 0.08);
+        this.playTone('sawtooth', 165, 92, 0.38, 0.36 * atten, 0, pan);
+        this.playTone('square', 330, 220, 0.16, 0.2 * atten, 0.06, pan);
+        this.playTone('sine', 740, 1180, 0.45, 0.26 * atten, 0.12, pan);
+        this.playNoise('highpass', 2200, 760, 1.8, 0.34, 0.24 * atten, 0.08, pan);
         break;
       case 'calendar':
         // Hard Stop: heavy chrono time-warp drop + crystalline chime
-        this.playTone('sine', 420, 72, 0.62, 0.46 * atten, 0);
-        this.playTone('triangle', 1046, 523, 0.35, 0.22 * atten, 0.05);
-        this.playTone('sine', 1568, 1568, 0.12, 0.15 * atten, 0.24);
+        this.playTone('sine', 420, 72, 0.62, 0.46 * atten, 0, pan);
+        this.playTone('triangle', 1046, 523, 0.35, 0.22 * atten, 0.05, pan);
+        this.playTone('sine', 1568, 1568, 0.12, 0.15 * atten, 0.24, pan);
         break;
       case 'chat':
         // @all Ping Overload: iconic dual emerald ping + sweeping sonar shockwave
-        this.playTone('sine', 880, 1320, 0.12, 0.3 * atten, 0);
-        this.playTone('sine', 1320, 1760, 0.18, 0.28 * atten, 0.09);
-        this.playNoise('bandpass', 2400, 320, 1.4, 0.5, 0.32 * atten, 0.1);
-        this.playTone('triangle', 260, 68, 0.42, 0.34 * atten, 0.1);
+        this.playTone('sine', 880, 1320, 0.12, 0.3 * atten, 0, pan);
+        this.playTone('sine', 1320, 1760, 0.18, 0.28 * atten, 0.09, pan);
+        this.playNoise('bandpass', 2400, 320, 1.4, 0.5, 0.32 * atten, 0.1, pan);
+        this.playTone('triangle', 260, 68, 0.42, 0.34 * atten, 0.1, pan);
         break;
       case 'slides':
         // Executive Spotlight: 0.3s charge shimmer + blazing golden orbital beam!
-        this.playTone('sine', 340, 1420, 0.3, 0.26 * atten, 0);
-        this.playTone('sawtooth', 180, 68, 0.65, 0.48 * atten, 0.29);
-        this.playNoise('bandpass', 3200, 620, 0.8, 0.58, 0.44 * atten, 0.29);
-        this.playTone('triangle', 980, 420, 0.5, 0.28 * atten, 0.3);
+        this.playTone('sine', 340, 1420, 0.3, 0.26 * atten, 0, pan);
+        this.playTone('sawtooth', 180, 68, 0.65, 0.48 * atten, 0.29, pan);
+        this.playNoise('bandpass', 3200, 620, 0.8, 0.58, 0.44 * atten, 0.29, pan);
+        this.playTone('triangle', 980, 420, 0.5, 0.28 * atten, 0.3, pan);
         break;
       case 'docs':
         // Version History: slick reverse rewind sweep + crisp Doc snap + Redline Pulse
-        this.playTone('sine', 320, 1180, 0.38, 0.28 * atten, 0);
-        this.playNoise('bandpass', 480, 2900, 1.8, 0.38, 0.28 * atten, 0);
-        this.playTone('triangle', 1240, 620, 0.16, 0.26 * atten, 0.36);
-        this.playTone('sine', 140, 45, 0.28, 0.42 * atten, 0.04);
+        this.playTone('sine', 320, 1180, 0.38, 0.28 * atten, 0, pan);
+        this.playNoise('bandpass', 480, 2900, 1.8, 0.38, 0.28 * atten, 0, pan);
+        this.playTone('triangle', 1240, 620, 0.16, 0.26 * atten, 0.36, pan);
+        this.playTone('sine', 140, 45, 0.28, 0.42 * atten, 0.04, pan);
         break;
     }
   }

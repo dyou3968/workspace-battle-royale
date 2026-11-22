@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Rarity } from '../types';
 
 interface TransientEffect {
   object: THREE.Object3D;
@@ -17,6 +18,7 @@ interface Particle {
   startScale: number;
   endScale: number;
   baseOpacity?: number;
+  rotVel?: THREE.Vector3;
 }
 
 interface FlashLight {
@@ -55,6 +57,7 @@ export class VfxSystem {
   private readonly unitBoxGeo = new THREE.BoxGeometry(1, 1, 1);
   private readonly unitConeGeo = new THREE.ConeGeometry(0.5, 1, 8);
   private readonly sparkGeo = new THREE.OctahedronGeometry(0.12, 0);
+  private readonly unitShardGeo = new THREE.OctahedronGeometry(0.16, 0);
 
   private readonly tmpVecA = new THREE.Vector3();
   private readonly tmpVecB = new THREE.Vector3();
@@ -64,6 +67,8 @@ export class VfxSystem {
     this.scene = scene;
     // Rotate unit ring so it lies flat on XZ plane by default
     this.unitRingGeo.rotateX(-Math.PI / 2);
+    // Faceted crystalline diamond shard profile for shield-shatter debris
+    this.unitShardGeo.scale(0.62, 1.65, 0.3);
 
     // Pre-allocate a tight pool of ONLY 2 dynamic point lights (recycles oldest light if >2 bursts overlap)
     // Combined with the world's 1 dynamic interior light, total scene PointLights stays <= 3 across WebGL shaders.
@@ -126,7 +131,7 @@ export class VfxSystem {
     endScale = 0.05,
     gravity = 16
   ): void {
-    if (this.particles.length > 180) return;
+    if (this.particles.length > 260) return;
     const mat = new THREE.MeshBasicMaterial({
       color,
       transparent: true,
@@ -146,6 +151,49 @@ export class VfxSystem {
       ttl,
       startScale,
       endScale,
+    });
+  }
+
+  private spawnCrystalShard(
+    pos: THREE.Vector3,
+    vel: THREE.Vector3,
+    color: number,
+    ttl = 0.48,
+    startScale = 1.2,
+    endScale = 0.22,
+    gravity = 13
+  ): void {
+    if (this.particles.length > 280) return;
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.88,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(this.unitShardGeo, mat);
+    mesh.position.copy(pos);
+    mesh.rotation.set(
+      Math.random() * Math.PI * 2,
+      Math.random() * Math.PI * 2,
+      Math.random() * Math.PI * 2
+    );
+    mesh.scale.setScalar(startScale);
+    this.scene.add(mesh);
+    this.particles.push({
+      mesh,
+      vel: vel.clone(),
+      gravity,
+      age: 0,
+      ttl,
+      startScale,
+      endScale,
+      baseOpacity: 0.88,
+      rotVel: new THREE.Vector3(
+        (Math.random() - 0.5) * 26,
+        (Math.random() - 0.5) * 26,
+        (Math.random() - 0.5) * 22
+      ),
     });
   }
 
@@ -289,32 +337,264 @@ export class VfxSystem {
   /** Shield shatter burst when a combatant's shield drops from >0 to 0. */
   public spawnShieldBreak(pos: THREE.Vector3): void {
     const center = pos.clone().add(new THREE.Vector3(0, 1.1, 0));
+
+    // 1. Bright electric cyan-white core flash sphere (0.18s)
+    const coreMat = new THREE.MeshBasicMaterial({
+      color: 0xe0f2fe,
+      transparent: true,
+      opacity: 0.96,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const coreFlash = new THREE.Mesh(this.unitSphereGeo, coreMat);
+    coreFlash.position.copy(center);
+    coreFlash.scale.setScalar(0.38);
+    this.addEffect(coreFlash, 0.18, (_dt, p) => {
+      const ease = 1 - Math.pow(1 - p, 2.5);
+      coreFlash.scale.setScalar(0.38 + ease * 0.92);
+      coreMat.opacity = 0.96 * Math.pow(1 - p, 1.6);
+    });
+
+    // 2. Dual expanding electric cyan shockwave rings (horizontal + tilted 35°)
+    const horizRingMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.95,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const horizRing = new THREE.Mesh(this.unitRingGeo, horizRingMat);
+    horizRing.position.copy(center);
+    horizRing.scale.setScalar(0.42);
+    this.addEffect(horizRing, 0.34, (_dt, p) => {
+      const ease = 1 - Math.pow(1 - p, 2.6);
+      horizRing.scale.setScalar(0.42 + ease * 2.45);
+      horizRingMat.opacity = 0.95 * (1 - p);
+    });
+
+    const tiltedRingMat = new THREE.MeshBasicMaterial({
+      color: 0x7dd3fc,
+      transparent: true,
+      opacity: 0.92,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const tiltedRing = new THREE.Mesh(this.unitTorusGeo, tiltedRingMat);
+    tiltedRing.position.copy(center);
+    tiltedRing.rotation.order = 'YXZ';
+    tiltedRing.rotation.set(Math.PI / 2 + (35 * Math.PI) / 180, Math.random() * Math.PI * 2, 0);
+    tiltedRing.scale.setScalar(0.36);
+    this.addEffect(tiltedRing, 0.36, (dt, p) => {
+      const ease = 1 - Math.pow(1 - p, 2.4);
+      tiltedRing.scale.setScalar(0.36 + ease * 2.15);
+      tiltedRing.rotation.z += dt * 4.2;
+      tiltedRingMat.opacity = 0.92 * (1 - p);
+    });
+
+    // 3. Rapid-expanding shattering wireframe hex shell
     const shellMat = new THREE.MeshBasicMaterial({
       color: 0x38bdf8,
       wireframe: true,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.94,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const shell = new THREE.Mesh(this.unitSphereGeo, shellMat);
     shell.position.copy(center);
-    shell.scale.setScalar(0.6);
-    this.addEffect(shell, 0.36, (_dt, p) => {
-      shell.scale.setScalar(0.6 + p * 1.45);
-      shell.rotation.y += 0.12;
-      shellMat.opacity = 0.9 * (1 - p);
+    shell.scale.setScalar(0.55);
+    this.addEffect(shell, 0.34, (dt, p) => {
+      const ease = 1 - Math.pow(1 - p, 2.2);
+      shell.scale.setScalar(0.55 + ease * 1.85);
+      shell.rotation.y += dt * 5.2;
+      shell.rotation.z += dt * 2.4;
+      shellMat.opacity = 0.94 * (1 - p);
     });
-    for (let i = 0; i < 16; i++) {
-      const a = (i / 16) * Math.PI * 2;
+
+    // 4. 28 high-velocity electric multi-tone sparks bursting radially + arcing upward
+    const sparkPalette = [0x38bdf8, 0x7dd3fc, 0xe0f2fe, 0x4285f4];
+    for (let i = 0; i < 28; i++) {
+      const a = (i / 28) * Math.PI * 2 + (Math.random() - 0.5) * 0.22;
+      const radialSpeed = 6.2 + Math.random() * 6.4;
       const vel = new THREE.Vector3(
-        Math.cos(a) * (4 + Math.random() * 4),
-        2 + Math.random() * 4,
-        Math.sin(a) * (4 + Math.random() * 4)
+        Math.cos(a) * radialSpeed,
+        2.6 + Math.random() * 5.2,
+        Math.sin(a) * radialSpeed
       );
-      this.spawnSpark(center, vel, 0x7dd3fc, 0.42, 1.4, 0.08, 12);
+      this.spawnSpark(
+        center,
+        vel,
+        sparkPalette[i % sparkPalette.length],
+        0.36 + Math.random() * 0.2,
+        1.25 + Math.random() * 0.5,
+        0.05,
+        16
+      );
     }
-    this.triggerFlashLight(center, 0x38bdf8, 6.0, 11, 0.18);
+
+    // 5. 10 spinning translucent crystalline glass shards flying outward & tumbling for 0.48s
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 + (Math.random() - 0.5) * 0.32;
+      const radialSpeed = 4.6 + Math.random() * 4.4;
+      const startOffset = new THREE.Vector3(
+        Math.cos(a) * 0.32,
+        (Math.random() - 0.35) * 0.45,
+        Math.sin(a) * 0.32
+      );
+      const vel = new THREE.Vector3(
+        Math.cos(a) * radialSpeed,
+        2.4 + Math.random() * 3.6,
+        Math.sin(a) * radialSpeed
+      );
+      this.spawnCrystalShard(
+        center.clone().add(startOffset),
+        vel,
+        i % 2 === 0 ? 0xbae6fd : 0x38bdf8,
+        0.48,
+        1.05 + Math.random() * 0.45,
+        0.22,
+        13
+      );
+    }
+
+    // 6. Brighter cyan flash light
+    this.triggerFlashLight(center, 0x38bdf8, 9.5, 14, 0.24);
+  }
+
+  /** Holographic scan burst when upgrading a weapon at a TechStop kiosk. */
+  public spawnTechStopUpgrade(pos: THREE.Vector3, rarity: Rarity): void {
+    const isEpic = rarity === 'epic';
+    const primaryColor = isEpic ? 0xa855f7 : 0x4285f4;
+    const accentColor = isEpic ? 0xe9d5ff : 0x7dd3fc;
+
+    const group = new THREE.Group();
+    group.position.copy(pos);
+
+    // Vertical holographic scan beam cylinder (outer + bright inner core)
+    const outerBeamMat = new THREE.MeshBasicMaterial({
+      color: primaryColor,
+      transparent: true,
+      opacity: 0.42,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const outerBeam = new THREE.Mesh(this.unitCylinderGeo, outerBeamMat);
+    outerBeam.position.y = 2.3;
+    outerBeam.scale.set(0.88, 4.6, 0.88);
+    group.add(outerBeam);
+
+    const innerBeamMat = new THREE.MeshBasicMaterial({
+      color: accentColor,
+      transparent: true,
+      opacity: 0.68,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const innerBeam = new THREE.Mesh(this.unitCylinderGeo, innerBeamMat);
+    innerBeam.position.y = 2.5;
+    innerBeam.scale.set(0.28, 5.0, 0.28);
+    group.add(innerBeam);
+
+    // Rising twin concentric holographic scan rings
+    const lowerRingMat = new THREE.MeshBasicMaterial({
+      color: primaryColor,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const lowerRing = new THREE.Mesh(this.unitTorusGeo, lowerRingMat);
+    lowerRing.rotation.x = Math.PI / 2;
+    lowerRing.position.y = 0.2;
+    lowerRing.scale.setScalar(0.75);
+    group.add(lowerRing);
+
+    const upperRingMat = new THREE.MeshBasicMaterial({
+      color: accentColor,
+      transparent: true,
+      opacity: 0.92,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const upperRing = new THREE.Mesh(this.unitTorusGeo, upperRingMat);
+    upperRing.rotation.x = Math.PI / 2;
+    upperRing.position.y = 0.55;
+    upperRing.scale.setScalar(0.5);
+    group.add(upperRing);
+
+    // Ground halo ring
+    const groundRingMat = new THREE.MeshBasicMaterial({
+      color: primaryColor,
+      transparent: true,
+      opacity: 0.82,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const groundRing = new THREE.Mesh(this.unitRingGeo, groundRingMat);
+    groundRing.position.y = 0.12;
+    groundRing.scale.setScalar(0.6);
+    group.add(groundRing);
+
+    this.addEffect(group, 0.76, (dt, p) => {
+      const ease = 1 - Math.pow(1 - p, 2.3);
+      const fade = Math.max(0, 1 - p);
+
+      const outerR = 0.88 + ease * 0.42;
+      outerBeam.scale.set(outerR, 4.6 + ease * 0.8, outerR);
+      outerBeamMat.opacity = 0.42 * fade;
+
+      const innerR = Math.max(0.05, 0.28 * (1 - p * 0.65));
+      innerBeam.scale.set(innerR, 5.0 + ease * 0.9, innerR);
+      innerBeamMat.opacity = 0.68 * fade;
+
+      lowerRing.position.y = 0.2 + ease * 3.1;
+      lowerRing.scale.setScalar(0.75 + ease * 0.95);
+      lowerRing.rotation.z += dt * 3.6;
+      lowerRingMat.opacity = 0.95 * fade;
+
+      upperRing.position.y = 0.55 + ease * 3.55;
+      upperRing.scale.setScalar(0.5 + ease * 0.78);
+      upperRing.rotation.z -= dt * 4.8;
+      upperRingMat.opacity = 0.92 * fade;
+
+      groundRing.scale.setScalar(0.6 + ease * 2.1);
+      groundRingMat.opacity = 0.82 * fade;
+    });
+
+    // 22 ascending sparkle particles tinted Electric Blue (rare) or Royal Epic Purple (epic)
+    for (let i = 0; i < 22; i++) {
+      const a = (i / 22) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+      const r = 0.35 + Math.random() * 0.85;
+      const start = new THREE.Vector3(
+        pos.x + Math.cos(a) * r,
+        pos.y + 0.18 + Math.random() * 1.15,
+        pos.z + Math.sin(a) * r
+      );
+      const swirlX = -Math.sin(a) * 0.9 + Math.cos(a) * (0.4 + Math.random() * 0.7);
+      const swirlZ = Math.cos(a) * 0.9 + Math.sin(a) * (0.4 + Math.random() * 0.7);
+      this.spawnSpark(
+        start,
+        new THREE.Vector3(swirlX, 3.4 + Math.random() * 3.4, swirlZ),
+        i % 2 === 0 ? primaryColor : accentColor,
+        0.56 + Math.random() * 0.28,
+        0.95 + Math.random() * 0.45,
+        0.05,
+        -1.8
+      );
+    }
+
+    this.triggerFlashLight(
+      pos.clone().add(new THREE.Vector3(0, 1.5, 0)),
+      primaryColor,
+      isEpic ? 9.0 : 7.5,
+      14,
+      0.34
+    );
   }
 
   /** Explosive shockwave + fire core + sparks (Nova GL-40, Gmail Reply-All, eliminations). */
@@ -1232,8 +1512,14 @@ export class VfxSystem {
       const p = pt.age / pt.ttl;
       pt.vel.y -= pt.gravity * dt;
       pt.mesh.position.addScaledVector(pt.vel, dt);
-      pt.mesh.rotation.x += dt * 7;
-      pt.mesh.rotation.y += dt * 5;
+      if (pt.rotVel) {
+        pt.mesh.rotation.x += pt.rotVel.x * dt;
+        pt.mesh.rotation.y += pt.rotVel.y * dt;
+        pt.mesh.rotation.z += pt.rotVel.z * dt;
+      } else {
+        pt.mesh.rotation.x += dt * 7;
+        pt.mesh.rotation.y += dt * 5;
+      }
       const scale = pt.startScale + (pt.endScale - pt.startScale) * p;
       pt.mesh.scale.setScalar(Math.max(0.01, scale));
       (pt.mesh.material as THREE.MeshBasicMaterial).opacity = (pt.baseOpacity ?? 0.95) * (1 - p);
