@@ -76,6 +76,8 @@ import { PersistentZoneVisual, VfxSystem } from './vfx';
 
 export type { SplashAttractState, SplashSceneMeta };
 import {
+  BOT_DROP_IGNORE_SEC,
+  BOT_UTILITY_SWAP_HYSTERESIS,
   BotBrain,
   BotChestSnapshot,
   BotCombatantSnapshot,
@@ -83,6 +85,7 @@ import {
   BotLootSnapshot,
   BotSupplyDropSnapshot,
   BotWorldContext,
+  getBotUtilityValue,
 } from '../ai/botBrain';
 import { MultiplayerClient } from '../net/mpClient';
 import {
@@ -342,6 +345,8 @@ interface GroundLoot {
   popStartY?: number;
   popStartZ?: number;
   popProgress?: number;
+  droppedById?: string;
+  droppedAt?: number;
 }
 
 interface LootChestEntity {
@@ -3834,6 +3839,8 @@ export class WorkspaceRoyaleEngine {
       kind: l.kind,
       itemId: l.itemId,
       rarity: l.rarity,
+      droppedById: l.droppedById,
+      droppedAt: l.droppedAt,
     }));
 
     const chestSnaps: BotChestSnapshot[] = this.lootChests
@@ -5765,9 +5772,82 @@ export class WorkspaceRoyaleEngine {
     return best;
   }
 
+  private canBotTakeLoot(c: Combatant, loot: GroundLoot): boolean {
+    if (
+      loot.droppedById === c.id &&
+      loot.droppedAt !== undefined &&
+      this.matchElapsed - loot.droppedAt < BOT_DROP_IGNORE_SEC
+    ) {
+      return false;
+    }
+
+    const rarityRank: Record<Rarity, number> = { common: 1, rare: 2, epic: 3 };
+
+    if (loot.kind === 'item') {
+      const uDef = UTILITY_ITEMS[loot.itemId as UtilityItemId];
+      for (const s of c.slots) {
+        if (
+          s &&
+          s.kind === 'item' &&
+          s.id === loot.itemId &&
+          ((s.count ?? 0) < uDef.maxStack || rarityRank[loot.rarity] > rarityRank[s.rarity])
+        ) {
+          return true;
+        }
+      }
+    } else {
+      for (const s of c.slots) {
+        if (s && s.kind === 'weapon' && s.id === loot.itemId && rarityRank[loot.rarity] > rarityRank[s.rarity]) {
+          return true;
+        }
+      }
+    }
+
+    if (c.slots.some((s) => s === null)) {
+      return true;
+    }
+
+    // Full inventory: strict monotonic upgrade only
+    if (loot.kind === 'weapon') {
+      let weaponCount = 0;
+      let lowestWeaponRank = 99;
+      let hasUtilitySlot = false;
+      for (const s of c.slots) {
+        if (!s) continue;
+        if (s.kind === 'weapon') {
+          weaponCount++;
+          lowestWeaponRank = Math.min(lowestWeaponRank, rarityRank[s.rarity]);
+        } else {
+          hasUtilitySlot = true;
+        }
+      }
+      if (weaponCount === 0) return hasUtilitySlot;
+      return lowestWeaponRank < rarityRank[loot.rarity];
+    }
+
+    // Full inventory utility item: never replace a weapon, never duplicate a full stack, require strict hysteresis upgrade
+    if (c.slots.some((s) => s !== null && s.kind === 'item' && s.id === loot.itemId)) {
+      return false;
+    }
+    let worstVal = Infinity;
+    for (const s of c.slots) {
+      if (s && s.kind === 'item') {
+        worstVal = Math.min(worstVal, getBotUtilityValue(s.id as UtilityItemId, s.rarity));
+      }
+    }
+    if (worstVal === Infinity) return false;
+    const newVal = getBotUtilityValue(loot.itemId as UtilityItemId, loot.rarity);
+    return newVal >= worstVal + BOT_UTILITY_SWAP_HYSTERESIS;
+  }
+
   private pickupLoot(c: Combatant, loot: GroundLoot): void {
     const idx = this.lootDrops.indexOf(loot);
     if (idx < 0) return;
+
+    // For bots, verify the item can actually be placed/upgraded/swapped cleanly before claiming
+    if (!c.isPlayer && !this.canBotTakeLoot(c, loot)) {
+      return;
+    }
 
     if (this.mpActive) {
       if (!c.isPlayer && !(this.isMpHost && !c.isRemoteHuman)) return;
@@ -5800,10 +5880,15 @@ export class WorkspaceRoyaleEngine {
 
     if (loot.kind === 'item') {
       const uDef = UTILITY_ITEMS[loot.itemId as UtilityItemId];
-      // Try stacking into existing matching item slot first
+      // Try stacking into existing matching item slot (or upgrading its rarity in place) first
       for (let i = 0; i < c.slots.length; i++) {
         const s = c.slots[i];
-        if (s && s.kind === 'item' && s.id === loot.itemId && (s.count ?? 0) < uDef.maxStack) {
+        if (
+          s &&
+          s.kind === 'item' &&
+          s.id === loot.itemId &&
+          ((s.count ?? 0) < uDef.maxStack || rarityRank[loot.rarity] > rarityRank[s.rarity])
+        ) {
           s.count = Math.min(uDef.maxStack, (s.count ?? 0) + loot.count);
           if (rarityRank[loot.rarity] > rarityRank[s.rarity]) {
             s.rarity = loot.rarity;
@@ -5850,17 +5935,67 @@ export class WorkspaceRoyaleEngine {
       }
     }
 
-    // Otherwise swap with active slot (or lowest-rarity weapon slot for bots) and drop previous item
+    // Otherwise swap with active slot (for human player) or strictly worse matching slot (for bots)
     if (!placed) {
       let replaceIdx = c.activeSlot;
-      if (!c.isPlayer && loot.kind === 'weapon') {
-        let lowestScore = 99;
-        for (let i = 0; i < c.slots.length; i++) {
-          const s = c.slots[i];
-          if (s && s.kind === 'weapon' && rarityRank[s.rarity] < lowestScore) {
-            lowestScore = rarityRank[s.rarity];
-            replaceIdx = i;
+      if (!c.isPlayer) {
+        if (loot.kind === 'weapon') {
+          let lowestScore = 99;
+          let lowestWeaponIdx = -1;
+          let weaponCount = 0;
+          let worstUtilVal = Infinity;
+          let worstUtilIdx = -1;
+          for (let i = 0; i < c.slots.length; i++) {
+            const s = c.slots[i];
+            if (!s) continue;
+            if (s.kind === 'weapon') {
+              weaponCount++;
+              if (rarityRank[s.rarity] < lowestScore) {
+                lowestScore = rarityRank[s.rarity];
+                lowestWeaponIdx = i;
+              }
+            } else {
+              const uVal = getBotUtilityValue(s.id as UtilityItemId, s.rarity);
+              if (uVal < worstUtilVal) {
+                worstUtilVal = uVal;
+                worstUtilIdx = i;
+              }
+            }
           }
+          if (weaponCount > 0) {
+            if (lowestWeaponIdx < 0 || lowestScore >= rarityRank[loot.rarity]) {
+              // No strictly worse weapon to replace: abort cleanly and leave loot untouched
+              return;
+            }
+            replaceIdx = lowestWeaponIdx;
+          } else if (worstUtilIdx >= 0) {
+            replaceIdx = worstUtilIdx;
+          } else {
+            return;
+          }
+        } else {
+          // Bot utility swap: NEVER replace a weapon slot, never duplicate a full stack, require strict hysteresis upgrade
+          if (c.slots.some((s) => s !== null && s.kind === 'item' && s.id === loot.itemId)) {
+            return;
+          }
+          let worstUtilVal = Infinity;
+          let worstUtilIdx = -1;
+          for (let i = 0; i < c.slots.length; i++) {
+            const s = c.slots[i];
+            if (s && s.kind === 'item') {
+              const uVal = getBotUtilityValue(s.id as UtilityItemId, s.rarity);
+              if (uVal < worstUtilVal) {
+                worstUtilVal = uVal;
+                worstUtilIdx = i;
+              }
+            }
+          }
+          if (worstUtilIdx < 0) return;
+          const newVal = getBotUtilityValue(loot.itemId as UtilityItemId, loot.rarity);
+          if (newVal < worstUtilVal + BOT_UTILITY_SWAP_HYSTERESIS) {
+            return;
+          }
+          replaceIdx = worstUtilIdx;
         }
       }
       const prev = c.slots[replaceIdx];
@@ -5897,6 +6032,8 @@ export class WorkspaceRoyaleEngine {
           undefined,
           explicitDropId
         );
+        spawned.droppedById = c.id;
+        spawned.droppedAt = this.matchElapsed;
         if (this.mpActive) {
           this.mpClient?.send({
             type: 'loot_spawn',

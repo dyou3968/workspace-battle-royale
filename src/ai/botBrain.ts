@@ -54,6 +54,8 @@ export interface BotLootSnapshot {
   kind: 'weapon' | 'item';
   itemId: WeaponId | UtilityItemId;
   rarity: Rarity;
+  droppedById?: string;
+  droppedAt?: number;
 }
 
 export interface BotChestSnapshot {
@@ -116,6 +118,22 @@ const RARITY_SCORE: Record<Rarity, number> = {
   rare: 2.1,
   epic: 3.4,
 };
+
+export const BOT_DROP_IGNORE_SEC = 12.0;
+export const BOT_UTILITY_SWAP_HYSTERESIS = 8;
+
+const BOT_UTILITY_BASE_VALUE: Record<UtilityItemId, number> = {
+  shield_jug: 38,
+  medkit: 36,
+  shield_cell: 30,
+  hardlight_cover: 22,
+  impulse_booster: 18,
+  mana_elixir: 16,
+};
+
+export function getBotUtilityValue(itemId: UtilityItemId, rarity: Rarity): number {
+  return (BOT_UTILITY_BASE_VALUE[itemId] ?? 15) + RARITY_SCORE[rarity] * 10;
+}
 
 function gaussianApprox(): number {
   return (Math.random() + Math.random() + Math.random() - 1.5) * 0.9;
@@ -1648,21 +1666,37 @@ export class BotBrain {
           ? 52
           : 78;
 
-    // Current best weapon rarity score
+    // Current weapon & utility inventory quality snapshot
     let bestWeaponScore = 0;
+    let worstWeaponScore = Infinity;
     let weaponCount = 0;
     let hasEmptySlot = false;
+    let worstUtilityValue = Infinity;
     for (const slot of self.slots) {
       if (!slot) {
         hasEmptySlot = true;
       } else if (slot.kind === 'weapon') {
         weaponCount++;
-        bestWeaponScore = Math.max(bestWeaponScore, RARITY_SCORE[slot.rarity]);
+        const wScore = RARITY_SCORE[slot.rarity];
+        bestWeaponScore = Math.max(bestWeaponScore, wScore);
+        worstWeaponScore = Math.min(worstWeaponScore, wScore);
+      } else if (slot.kind === 'item') {
+        const uVal = getBotUtilityValue(slot.id as UtilityItemId, slot.rarity);
+        worstUtilityValue = Math.min(worstUtilityValue, uVal);
       }
     }
+    if (weaponCount === 0) worstWeaponScore = 0;
 
     let best: { loot: BotLootSnapshot; dist: number; value: number } | null = null;
     for (const loot of world.lootDrops) {
+      // Never re-pick loot this bot just dropped (prevents any residual drop/pickup loop)
+      if (
+        loot.droppedById === self.id &&
+        loot.droppedAt !== undefined &&
+        world.time - loot.droppedAt < BOT_DROP_IGNORE_SEC
+      ) {
+        continue;
+      }
       // Skip loot on a different floor (e.g. rooftop loot when bot is looting inside ground-floor office)
       if (Math.abs(loot.y - self.pos.y) > 2.8) continue;
       const d = Math.hypot(loot.x - self.pos.x, loot.z - self.pos.z);
@@ -1671,28 +1705,58 @@ export class BotBrain {
       let value = 0;
       if (loot.kind === 'weapon') {
         const rScore = RARITY_SCORE[loot.rarity];
+        const sameWeaponUpgrade = self.slots.some(
+          (s) => s !== null && s.kind === 'weapon' && s.id === loot.itemId && rScore > RARITY_SCORE[s.rarity]
+        );
         if (unarmed) {
           // Immediately grab ANY weapon dropped from an opened chest!
           value = 110 + rScore * 16 + (d < 6 ? 45 : 0);
-        } else if (rScore > bestWeaponScore || (hasEmptySlot && (weaponCount < 2 || rScore >= 2))) {
+        } else if (hasEmptySlot) {
+          if (rScore > bestWeaponScore || weaponCount < 2 || rScore >= 2) {
+            value = rScore * 22 * this.profile.lootUpgradeDesire + (d < 5.5 ? 16 : 0);
+          }
+        } else if (sameWeaponUpgrade || (weaponCount > 0 && rScore > worstWeaponScore)) {
+          // Full inventory: only upgrade an existing weapon in-place or strictly upgrade worst carried weapon
           value = rScore * 22 * this.profile.lootUpgradeDesire + (d < 5.5 ? 16 : 0);
         }
       } else {
         const uId = loot.itemId as UtilityItemId;
-        const alreadyHas = this.findItemSlot(self, uId) !== -1;
+        const existingIdx = this.findItemSlot(self, uId);
+        const existingSlot = existingIdx !== -1 ? self.slots[existingIdx] : null;
         const isShield = uId === 'shield_cell' || uId === 'shield_jug';
         if (unarmed) {
-          // Only grab adjacent utility if right at feet (< 4.5m); weapons remain top priority
+          // Only grab adjacent utility if right at feet (< 4.5m) and it can fit/stack; weapons remain top priority
           if (d < 4.5) {
-            value = isShield ? 26 : 16;
+            const canTakeUnarmed = existingSlot
+              ? (existingSlot.count ?? 0) < UTILITY_ITEMS[uId].maxStack ||
+                RARITY_SCORE[loot.rarity] > RARITY_SCORE[existingSlot.rarity]
+              : hasEmptySlot;
+            if (canTakeUnarmed) {
+              value = isShield ? 26 : 16;
+            }
           }
-        } else if (!alreadyHas && (hasEmptySlot || loot.rarity !== 'common')) {
+        } else if (existingSlot) {
+          const canStack = (existingSlot.count ?? 0) < UTILITY_ITEMS[uId].maxStack;
+          const canUpgradeRarityInPlace = RARITY_SCORE[loot.rarity] > RARITY_SCORE[existingSlot.rarity];
+          if (canStack || canUpgradeRarityInPlace) {
+            value =
+              (8 + (canUpgradeRarityInPlace ? 10 : 0) + (isShield && self.shield < 50 ? 10 : 0)) *
+              this.profile.lootUpgradeDesire;
+          }
+        } else if (hasEmptySlot) {
           const shieldBonus = isShield && self.shield < 60 ? 18 : 0;
           value =
             (14 + RARITY_SCORE[loot.rarity] * 6 + shieldBonus) * this.profile.lootUpgradeDesire +
             (d < 5.5 ? 18 : 0);
-        } else if (alreadyHas) {
-          value = (8 + (isShield && self.shield < 50 ? 10 : 0)) * this.profile.lootUpgradeDesire;
+        } else if (
+          worstUtilityValue < Infinity &&
+          getBotUtilityValue(uId, loot.rarity) >= worstUtilityValue + BOT_UTILITY_SWAP_HYSTERESIS
+        ) {
+          // Full inventory: strictly higher monotonic utility value with hysteresis margin (ping-pong impossible)
+          const shieldBonus = isShield && self.shield < 60 ? 18 : 0;
+          value =
+            (14 + RARITY_SCORE[loot.rarity] * 6 + shieldBonus) * this.profile.lootUpgradeDesire +
+            (d < 5.5 ? 18 : 0);
         }
       }
 
