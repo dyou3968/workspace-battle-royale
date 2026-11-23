@@ -1427,6 +1427,84 @@ export class AssetManager {
     return root;
   }
 
+  /**
+   * Clones the utility `.glb` scaled and centered cleanly for right-hand `WeaponSocket_R`
+   * grip with a subtle rarity accent trim for Rare/Epic/Mythic utilities.
+   */
+  public instantiateHeldUtility(itemId: UtilityItemId, rarity: Rarity): THREE.Group {
+    const root = new THREE.Group();
+    root.name = `HeldUtility_${itemId}_${rarity}`;
+
+    const inner = this.instantiateUtility(itemId);
+    const heldScaleMap: Record<UtilityItemId, number> = {
+      frag_grenade: 0.75,
+      flashbang: 0.72,
+      shield_drop: 0.68,
+      regen_pod: 0.66,
+      hardlight_cover: 0.68,
+      impulse_booster: 0.68,
+      shield_cell: 0.70,
+      shield_jug: 0.62,
+      medkit: 0.60,
+      mana_elixir: 0.68,
+    };
+    const scale = heldScaleMap[itemId] ?? 0.68;
+
+    inner.traverse((obj) => {
+      if ((obj as THREE.Mesh).isMesh) {
+        const mesh = obj as THREE.Mesh;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        const tintOne = (mat: THREE.Material): THREE.Material => {
+          if (mat.name && mat.name.toLowerCase().includes('rarityaccent')) {
+            return this.getWeaponAccentMaterial(mat, rarity);
+          }
+          return mat;
+        };
+        if (Array.isArray(mesh.material)) {
+          mesh.material = mesh.material.map(tintOne);
+        } else if (mesh.material) {
+          mesh.material = tintOne(mesh.material);
+        }
+      }
+    });
+
+    // Center the utility prop cleanly in the palm at WeaponSocket_R origin
+    inner.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(inner);
+    if (!box.isEmpty()) {
+      const center = new THREE.Vector3();
+      box.getCenter(center);
+      inner.position.sub(center);
+    }
+
+    const holder = new THREE.Group();
+    holder.scale.setScalar(scale);
+    holder.add(inner);
+
+    // Subtle glowing rarity collar accent for non-common utilities
+    if (rarity !== 'common') {
+      const rarityCfg = RARITY_CONFIG[rarity];
+      const accentRing = new THREE.Mesh(
+        new THREE.TorusGeometry(0.11, 0.011, 8, 20),
+        new THREE.MeshStandardMaterial({
+          color: rarityCfg.hex,
+          emissive: rarityCfg.hex,
+          emissiveIntensity: rarity === 'mythic' ? 1.4 : 0.85,
+          roughness: 0.25,
+          metalness: 0.5,
+        })
+      );
+      accentRing.rotation.x = Math.PI * 0.5;
+      accentRing.castShadow = false;
+      accentRing.receiveShadow = false;
+      holder.add(accentRing);
+    }
+
+    root.add(holder);
+    return root;
+  }
+
   public instantiateProp(propId: PropAssetId): THREE.Group {
     const gltf = this.cache.get(`prop:${propId}`);
     const root = new THREE.Group();

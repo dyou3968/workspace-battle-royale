@@ -208,6 +208,20 @@ interface Combatant {
   gliderMesh: THREE.Group;
   weaponInstance: WeaponInstance | null;
   equippedKey: string;
+  heldUtilityMesh: THREE.Group | null;
+  heldUtilityKey: string;
+
+  // Dedicated procedural upper-body utility/grenade throw animation state
+  throwAnimStyle: 'overhand' | 'toss' | 'impulse' | null;
+  throwAnimElapsed: number;
+  throwAnimDuration: number;
+  throwReleaseTime: number;
+  throwReleased: boolean;
+  pendingUtilityThrow: {
+    itemId: UtilityItemId;
+    rarity: Rarity;
+    slotIndex: number;
+  } | null;
 
   pos: THREE.Vector3;
   vel: THREE.Vector3;
@@ -742,6 +756,10 @@ export class WorkspaceRoyaleEngine {
   private readonly tmpSlideRootQuat = new THREE.Quaternion();
   private readonly tmpSlideFootQuat = new THREE.Quaternion();
   private readonly tmpSlideEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+  private readonly tmpThrowShoulder = new THREE.Vector3();
+  private readonly tmpThrowCurHand = new THREE.Vector3();
+  private readonly tmpThrowTarget = new THREE.Vector3();
+  private readonly tmpThrowModelQuat = new THREE.Quaternion();
   private readonly tmpQuatA = new THREE.Quaternion();
   private readonly tmpQuatB = new THREE.Quaternion();
   private readonly tmpQuatC = new THREE.Quaternion();
@@ -1639,6 +1657,14 @@ export class WorkspaceRoyaleEngine {
       gliderMesh,
       weaponInstance: null,
       equippedKey: '',
+      heldUtilityMesh: null,
+      heldUtilityKey: '',
+      throwAnimStyle: null,
+      throwAnimElapsed: 0,
+      throwAnimDuration: 0,
+      throwReleaseTime: 0,
+      throwReleased: false,
+      pendingUtilityThrow: null,
       pos: new THREE.Vector3(opts.x, opts.y, opts.z),
       vel: new THREE.Vector3(0, -8, 0),
       yaw: opts.yaw,
@@ -3014,6 +3040,29 @@ export class WorkspaceRoyaleEngine {
         }
       }
 
+      // Dedicated procedural utility/grenade throw animation progression & synchronized hand release
+      if (c.throwAnimStyle !== null) {
+        if (c.skyDropping || c.inBus || c.ridingGBikeId !== null) {
+          this.cancelUtilityThrow(c);
+        } else {
+          c.throwAnimElapsed += dt;
+          if (!c.throwReleased && c.throwAnimElapsed >= c.throwReleaseTime) {
+            c.throwReleased = true;
+            if (c.pendingUtilityThrow && !isRemoteSimulated) {
+              this.executePendingUtilityThrow(c);
+            }
+          }
+          if (c.throwAnimElapsed >= c.throwAnimDuration) {
+            c.throwAnimStyle = null;
+            c.throwAnimElapsed = 0;
+            c.throwAnimDuration = 0;
+            c.throwReleaseTime = 0;
+            c.throwReleased = false;
+            c.pendingUtilityThrow = null;
+          }
+        }
+      }
+
       // Drive input (Local Player vs Remote Network Interpolation vs Multi-Tier Bot Brain)
       if (c.isPlayer) {
         this.updatePlayerController(c, dt, speedMult, fireRateMult);
@@ -3157,6 +3206,7 @@ export class WorkspaceRoyaleEngine {
     }
     if (p.channel) this.cancelChannel(p);
     if (p.isReloading) this.cancelReload(p);
+    if (p.throwAnimStyle !== null) this.cancelUtilityThrow(p);
     if (p.sliding) this.endSlide(p, false);
     if (p.isPlayer) {
       this.crouchToggled = false;
@@ -4369,6 +4419,9 @@ export class WorkspaceRoyaleEngine {
     if (shooter.skyDropping || shooter.isReloading || shooter.fireCooldown > 0) return false;
     const slot = shooter.slots[shooter.activeSlot];
     if (!slot || slot.kind !== 'weapon') return false;
+    if (shooter.throwAnimStyle !== null && !shooter.pendingUtilityThrow) {
+      this.cancelUtilityThrow(shooter);
+    }
 
     const weaponId = slot.id as WeaponId;
     const weapon = WEAPONS[weaponId];
@@ -5069,6 +5122,7 @@ export class WorkspaceRoyaleEngine {
     }
     victim.sprinting = false;
     this.cancelReload(victim);
+    this.cancelUtilityThrow(victim);
     victim.hero.root.visible = false;
 
     this.vfx.spawnExplosion(
@@ -5828,7 +5882,8 @@ export class WorkspaceRoyaleEngine {
   }
 
   private tryUseActiveItem(c: Combatant): void {
-    if (!c.alive || c.skyDropping || c.channel) return;
+    if (!c.alive || c.skyDropping || c.channel || c.ridingGBikeId !== null) return;
+    if (c.pendingUtilityThrow !== null) return; // Block overlapping throws during wind-up
     const slot = c.slots[c.activeSlot];
     if (!slot || slot.kind !== 'item' || (slot.count ?? 0) <= 0) return;
 
@@ -5882,28 +5937,13 @@ export class WorkspaceRoyaleEngine {
         }
         return;
       }
-      if (def.manaCost) c.mana -= def.manaCost;
 
-      if (itemId === 'hardlight_cover') {
-        this.deployHardLightCover(c, slot.rarity);
-        if (c.isPlayer) this.audio.playChannelStart(itemId);
-      } else if (itemId === 'impulse_booster') {
-        this.activateImpulseBooster(c, slot.rarity);
-        if (c.isPlayer) this.audio.playChannelStart(itemId);
-      } else if (
-        itemId === 'frag_grenade' ||
-        itemId === 'flashbang' ||
-        itemId === 'shield_drop' ||
-        itemId === 'regen_pod'
-      ) {
-        this.throwTacticalUtility(c, itemId, slot.rarity);
-      }
-
-      this.consumeSlotItem(c, c.activeSlot);
+      this.startUtilityThrowAnim(c, itemId, slot.rarity, c.activeSlot);
       return;
     }
 
     // Start timed consumable channel (1.4s - 3.0s)
+    this.cancelUtilityThrow(c);
     if (c.sliding) {
       this.endSlide(c, false);
     }
@@ -5928,6 +5968,99 @@ export class WorkspaceRoyaleEngine {
     if (c.isPlayer) {
       this.audio.playChannelStart(itemId);
     }
+  }
+
+  private getThrowAnimConfig(itemId: UtilityItemId): {
+    style: 'overhand' | 'toss' | 'impulse';
+    duration: number;
+    releaseTime: number;
+  } {
+    if (itemId === 'frag_grenade' || itemId === 'flashbang') {
+      return { style: 'overhand', duration: 0.48, releaseTime: 0.13 };
+    }
+    if (itemId === 'impulse_booster') {
+      return { style: 'impulse', duration: 0.36, releaseTime: 0.06 };
+    }
+    return { style: 'toss', duration: 0.42, releaseTime: 0.13 };
+  }
+
+  private startUtilityThrowAnim(
+    c: Combatant,
+    itemId: UtilityItemId,
+    rarity: Rarity,
+    slotIndex: number
+  ): void {
+    const cfg = this.getThrowAnimConfig(itemId);
+    c.throwAnimStyle = cfg.style;
+    c.throwAnimElapsed = 0;
+    c.throwAnimDuration = cfg.duration;
+    c.throwReleaseTime = cfg.releaseTime;
+    c.throwReleased = false;
+    c.pendingUtilityThrow = { itemId, rarity, slotIndex };
+    c.isAds = false;
+    if (c.isPlayer) {
+      this.audio.playGrenadeThrow();
+    }
+  }
+
+  private startRemoteThrowAnim(c: Combatant, itemId: UtilityItemId): void {
+    if (!c.alive || c.skyDropping || c.inBus || c.ridingGBikeId !== null) return;
+    const cfg = this.getThrowAnimConfig(itemId);
+    c.throwAnimStyle = cfg.style;
+    c.throwAnimElapsed = 0;
+    c.throwAnimDuration = cfg.duration;
+    c.throwReleaseTime = cfg.releaseTime;
+    c.throwReleased = false;
+    c.pendingUtilityThrow = null;
+  }
+
+  private cancelUtilityThrow(c: Combatant): void {
+    c.throwAnimStyle = null;
+    c.throwAnimElapsed = 0;
+    c.throwAnimDuration = 0;
+    c.throwReleaseTime = 0;
+    c.throwReleased = false;
+    c.pendingUtilityThrow = null;
+  }
+
+  private executePendingUtilityThrow(c: Combatant): void {
+    const pending = c.pendingUtilityThrow;
+    c.pendingUtilityThrow = null;
+    if (!pending || !c.alive || c.skyDropping || c.inBus || c.ridingGBikeId !== null) return;
+
+    const slot = c.slots[pending.slotIndex];
+    if (!slot || slot.kind !== 'item' || slot.id !== pending.itemId || (slot.count ?? 0) <= 0) {
+      return;
+    }
+
+    const def = UTILITY_ITEMS[pending.itemId];
+    if (def.manaCost) {
+      if (c.mana < def.manaCost) {
+        if (c.isPlayer) {
+          this.audio.playDryFire();
+          this.callbacks.onAnnouncement('LOW MANA', `${def.name} requires ${def.manaCost} Mana`);
+        }
+        return;
+      }
+      c.mana -= def.manaCost;
+    }
+
+    if (pending.itemId === 'hardlight_cover') {
+      this.deployHardLightCover(c, pending.rarity);
+      if (c.isPlayer) this.audio.playChannelStart(pending.itemId);
+    } else if (pending.itemId === 'impulse_booster') {
+      this.activateImpulseBooster(c, pending.rarity);
+      if (c.isPlayer) this.audio.playChannelStart(pending.itemId);
+    } else if (
+      pending.itemId === 'frag_grenade' ||
+      pending.itemId === 'flashbang' ||
+      pending.itemId === 'shield_drop' ||
+      pending.itemId === 'regen_pod'
+    ) {
+      this.throwTacticalUtility(c, pending.itemId, pending.rarity);
+    }
+
+    this.consumeSlotItem(c, pending.slotIndex);
   }
 
   private cancelChannel(c: Combatant, notice?: string): void {
@@ -6059,8 +6192,8 @@ export class WorkspaceRoyaleEngine {
         const wIdx = c.slots.findIndex((s) => s?.kind === 'weapon');
         if (wIdx >= 0) {
           c.activeSlot = wIdx;
-          this.syncEquippedWeaponVisual(c);
         }
+        this.syncEquippedWeaponVisual(c);
       }
     }
   }
@@ -6121,12 +6254,17 @@ export class WorkspaceRoyaleEngine {
       this.mpActive && (c.isPlayer || (this.isMpHost && !c.isRemoteHuman));
 
     if (itemId === 'frag_grenade' || itemId === 'flashbang') {
-      const eyeY = c.crouching ? 1.05 : 1.48;
-      const origin = new THREE.Vector3(
-        c.pos.x + fwdX * 0.52,
-        c.pos.y + eyeY,
-        c.pos.z + fwdZ * 0.52
-      );
+      const origin = new THREE.Vector3();
+      if (c.hero.rightHandNode && c.hero.root.visible) {
+        c.hero.root.updateMatrixWorld(true);
+        c.hero.rightHandNode.getWorldPosition(origin);
+        origin.x += fwdX * 0.16;
+        origin.y += fwdY * 0.16 + 0.04;
+        origin.z += fwdZ * 0.16;
+      } else {
+        const eyeY = c.crouching ? 1.05 : 1.48;
+        origin.set(c.pos.x + fwdX * 0.52, c.pos.y + eyeY, c.pos.z + fwdZ * 0.52);
+      }
       const launchSpeed = itemId === 'frag_grenade' ? 22 : 24;
       const upBoost = itemId === 'frag_grenade' ? 5.5 : 5.0;
       const vel = new THREE.Vector3(
@@ -6134,9 +6272,6 @@ export class WorkspaceRoyaleEngine {
         fwdY * launchSpeed + upBoost,
         fwdZ * launchSpeed
       );
-      if (c.isPlayer) {
-        this.audio.playGrenadeThrow();
-      }
       this.spawnThrownUtility(c.id, itemId, rarity, origin, vel, false);
 
       if (shouldBroadcast) {
@@ -6477,6 +6612,10 @@ export class WorkspaceRoyaleEngine {
   }
 
   private handleMpUtilityThrow(event: UtilityThrowEvent): void {
+    const thrower = this.combatants.find((x) => x.id === event.ownerId);
+    if (thrower && !thrower.isPlayer && thrower.alive) {
+      this.startRemoteThrowAnim(thrower, event.itemId);
+    }
     const pos = new THREE.Vector3(event.x, event.y, event.z);
     if (event.itemId === 'frag_grenade' || event.itemId === 'flashbang') {
       const vel = new THREE.Vector3(event.vx, event.vy, event.vz);
@@ -7187,6 +7326,7 @@ export class WorkspaceRoyaleEngine {
     if (index < 0 || index >= c.slots.length || c.activeSlot === index) return;
     if (c.channel) this.cancelChannel(c);
     this.cancelReload(c);
+    this.cancelUtilityThrow(c);
     c.activeSlot = index;
     this.syncEquippedWeaponVisual(c);
   }
@@ -7207,6 +7347,7 @@ export class WorkspaceRoyaleEngine {
     const wDef = WEAPONS[slot.id as WeaponId];
     if ((slot.ammo ?? 0) >= getWeaponMagSize(wDef.id, slot.rarity)) return;
     if (c.channel) this.cancelChannel(c);
+    this.cancelUtilityThrow(c);
     // Direction A: immediately drop out of sprint and latch Shift so holding Shift+W doesn't cancel reload on next frame
     c.sprinting = false;
     if (c.isPlayer && (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'))) {
@@ -7232,27 +7373,56 @@ export class WorkspaceRoyaleEngine {
   private syncEquippedWeaponVisual(c: Combatant): void {
     const slot = c.slots[c.activeSlot];
     const desiredKey = slot && slot.kind === 'weapon' ? `${slot.id}:${slot.rarity}` : 'none';
-    if (c.equippedKey === desiredKey) return;
-    c.equippedKey = desiredKey;
+    if (c.equippedKey !== desiredKey) {
+      c.equippedKey = desiredKey;
 
-    if (c.weaponInstance) {
-      c.hero.weaponSocket.remove(c.weaponInstance.root);
-      c.weaponInstance = null;
+      if (c.weaponInstance) {
+        c.hero.weaponSocket.remove(c.weaponInstance.root);
+        c.weaponInstance = null;
+      }
+
+      if (slot && slot.kind === 'weapon') {
+        const inst = this.assetManager.instantiateWeapon(slot.id as WeaponId, slot.rarity);
+        inst.root.visible = !c.skyDropping && c.ridingGBikeId === null && c.throwAnimStyle === null;
+        if (!c.castingShadow) {
+          inst.root.traverse((obj) => {
+            if (obj instanceof THREE.Mesh) obj.castShadow = false;
+          });
+        }
+        c.hero.weaponSocket.add(inst.root);
+        c.weaponInstance = inst;
+        c.twoHandBlend = 1;
+        if (!c.skyDropping && c.ridingGBikeId === null && c.hero.root.visible && c.throwAnimStyle === null) {
+          alignWeaponTwoHanded(inst.root, c.hero, { weaponId: inst.weaponId });
+        }
+      }
     }
 
-    if (slot && slot.kind === 'weapon') {
-      const inst = this.assetManager.instantiateWeapon(slot.id as WeaponId, slot.rarity);
-      inst.root.visible = !c.skyDropping && c.ridingGBikeId === null;
-      if (!c.castingShadow) {
-        inst.root.traverse((obj) => {
-          if (obj instanceof THREE.Mesh) obj.castShadow = false;
-        });
+    // Mount or clear compact 3D held utility prop in right hand (`WeaponSocket_R`)
+    const desiredUtilKey =
+      slot && slot.kind === 'item' && (slot.count ?? 0) > 0 ? `${slot.id}:${slot.rarity}` : 'none';
+    if (c.heldUtilityKey !== desiredUtilKey) {
+      c.heldUtilityKey = desiredUtilKey;
+
+      if (c.heldUtilityMesh) {
+        c.hero.weaponSocket.remove(c.heldUtilityMesh);
+        c.heldUtilityMesh = null;
       }
-      c.hero.weaponSocket.add(inst.root);
-      c.weaponInstance = inst;
-      c.twoHandBlend = 1;
-      if (!c.skyDropping && c.ridingGBikeId === null && c.hero.root.visible) {
-        alignWeaponTwoHanded(inst.root, c.hero, { weaponId: inst.weaponId });
+
+      if (slot && slot.kind === 'item' && (slot.count ?? 0) > 0) {
+        const utilMesh = this.assetManager.instantiateHeldUtility(slot.id as UtilityItemId, slot.rarity);
+        utilMesh.visible =
+          !c.skyDropping &&
+          !c.inBus &&
+          c.ridingGBikeId === null &&
+          !(c.throwAnimStyle !== null && c.throwReleased);
+        if (!c.castingShadow) {
+          utilMesh.traverse((obj) => {
+            if (obj instanceof THREE.Mesh) obj.castShadow = false;
+          });
+        }
+        c.hero.weaponSocket.add(utilMesh);
+        c.heldUtilityMesh = utilMesh;
       }
     }
   }
@@ -7261,6 +7431,13 @@ export class WorkspaceRoyaleEngine {
     this.assetManager.setHeroCastShadow(c.hero, enabled);
     if (c.weaponInstance) {
       c.weaponInstance.root.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.castShadow = enabled;
+        }
+      });
+    }
+    if (c.heldUtilityMesh) {
+      c.heldUtilityMesh.traverse((obj) => {
         if (obj instanceof THREE.Mesh) {
           obj.castShadow = enabled;
         }
@@ -7352,6 +7529,279 @@ export class WorkspaceRoyaleEngine {
       this.tmpQuatB.setFromAxisAngle(this.tmpVecB, pitchRad * 0.65);
       chestNode.quaternion.premultiply(this.tmpQuatB);
     }
+  }
+
+  /**
+   * Layers a dedicated athletic upper-body procedural throw animation (`overhand`, `toss`,
+   * or `impulse`) on top of the live locomotion clip (`Idle`, `Run`, `Sprint`, `Crouch`, `Jump`,
+   * or `Slide`), recorded into `procBoneUndo` so legs keep moving smoothly and 0.000 residual
+   * bone twist remains after completion.
+   */
+  private applyUtilityThrowPose(c: Combatant): void {
+    const style = c.throwAnimStyle;
+    if (!style || c.throwAnimDuration <= 0.001) return;
+
+    const {
+      spineNode,
+      chestNode,
+      upperArmLNode,
+      lowerArmLNode,
+      leftHandNode,
+      upperArmRNode,
+      lowerArmRNode,
+      rightHandNode,
+      model,
+      root,
+    } = c.hero;
+
+    const t = THREE.MathUtils.clamp(c.throwAnimElapsed, 0, c.throwAnimDuration);
+    const smoothstep01 = (v: number): number => {
+      const x = THREE.MathUtils.clamp(v, 0, 1);
+      return x * x * (3 - 2 * x);
+    };
+    const easeOutQuad = (v: number): number => {
+      const x = THREE.MathUtils.clamp(v, 0, 1);
+      return 1 - (1 - x) * (1 - x);
+    };
+    const quadBezier = (p0: number, p1: number, p2: number, u: number): number => {
+      const inv = 1 - u;
+      return inv * inv * p0 + 2 * inv * u * p1 + u * u * p2;
+    };
+
+    let blend = 0;
+    let torsoYaw = 0;
+    let torsoPitch = 0;
+
+    // Hand targets expressed in hero.model space relative to their respective shoulders
+    let rX = 0;
+    let rY = 0;
+    let rZ = 0;
+    let rPoleX = 0.7;
+    let rPoleY = 0.2;
+    let rPoleZ = 0.45;
+
+    let lX = 0;
+    let lY = 0;
+    let lZ = 0;
+    let lPoleX = -0.7;
+    let lPoleY = -0.3;
+    let lPoleZ = 0.5;
+
+    if (style === 'overhand') {
+      // Frag Grenade & Flashbang (0.48s total: 0.00->0.13 wind-up, 0.13->0.24 whip release, 0.24->0.48 recovery)
+      const rel = c.throwReleaseTime; // 0.13s
+      const followEnd = 0.24;
+      if (t <= rel) {
+        const u = easeOutQuad(t / Math.max(rel, 0.001));
+        blend = easeOutQuad(t / Math.max(rel * 0.72, 0.001));
+        torsoYaw = -0.34 * u;
+        torsoPitch = +0.10 * u;
+        rX = +0.18;
+        rY = +0.34;
+        rZ = +0.26;
+        rPoleX = +0.85;
+        rPoleY = +0.35;
+        rPoleZ = +0.35;
+        lX = +0.04;
+        lY = -0.04;
+        lZ = -0.44;
+        lPoleX = -0.75;
+        lPoleY = -0.35;
+        lPoleZ = +0.45;
+      } else if (t <= followEnd) {
+        const w = smoothstep01((t - rel) / Math.max(followEnd - rel, 0.001));
+        blend = 1.0;
+        torsoYaw = THREE.MathUtils.lerp(-0.34, +0.36, w);
+        torsoPitch = THREE.MathUtils.lerp(+0.10, -0.15, w);
+        // Over-the-top whip arc: P0 (high back) -> P1 (high forward release apex) -> P2 (low cross-body follow-through)
+        rX = quadBezier(+0.18, +0.12, -0.26, w);
+        rY = quadBezier(+0.34, +0.40, -0.26, w);
+        rZ = quadBezier(+0.26, -0.40, -0.36, w);
+        rPoleX = THREE.MathUtils.lerp(+0.85, +0.65, w);
+        rPoleY = THREE.MathUtils.lerp(+0.35, +0.10, w);
+        rPoleZ = THREE.MathUtils.lerp(+0.35, +0.55, w);
+        lX = THREE.MathUtils.lerp(+0.04, -0.14, w);
+        lY = THREE.MathUtils.lerp(-0.04, -0.26, w);
+        lZ = THREE.MathUtils.lerp(-0.44, +0.24, w);
+        lPoleX = THREE.MathUtils.lerp(-0.75, -0.65, w);
+        lPoleY = THREE.MathUtils.lerp(-0.35, -0.25, w);
+        lPoleZ = THREE.MathUtils.lerp(+0.45, +0.65, w);
+      } else {
+        const fade = 1 - smoothstep01((t - followEnd) / Math.max(c.throwAnimDuration - followEnd, 0.001));
+        blend = fade;
+        torsoYaw = +0.36 * fade;
+        torsoPitch = -0.15 * fade;
+        rX = -0.26;
+        rY = -0.26;
+        rZ = -0.36;
+        rPoleX = +0.65;
+        rPoleY = +0.10;
+        rPoleZ = +0.55;
+        lX = -0.14;
+        lY = -0.26;
+        lZ = +0.24;
+        lPoleX = -0.65;
+        lPoleY = -0.25;
+        lPoleZ = +0.65;
+      }
+    } else if (style === 'toss') {
+      // Shield Drop, Regen Pod & Hard-Light Cover (0.42s total: 0.00->0.13 underhand wind-up, 0.13->0.25 sweep, 0.25->0.42 recovery)
+      const rel = c.throwReleaseTime; // 0.13s
+      const followEnd = 0.25;
+      if (t <= rel) {
+        const u = easeOutQuad(t / Math.max(rel, 0.001));
+        blend = easeOutQuad(t / Math.max(rel * 0.72, 0.001));
+        torsoYaw = -0.22 * u;
+        torsoPitch = -0.10 * u;
+        rX = +0.14;
+        rY = -0.44;
+        rZ = +0.28;
+        rPoleX = +0.65;
+        rPoleY = -0.15;
+        rPoleZ = +0.75;
+        lX = -0.02;
+        lY = -0.12;
+        lZ = -0.34;
+        lPoleX = -0.65;
+        lPoleY = -0.35;
+        lPoleZ = +0.55;
+      } else if (t <= followEnd) {
+        const w = smoothstep01((t - rel) / Math.max(followEnd - rel, 0.001));
+        blend = 1.0;
+        torsoYaw = THREE.MathUtils.lerp(-0.22, +0.24, w);
+        torsoPitch = THREE.MathUtils.lerp(-0.10, -0.04, w);
+        // Underhand sweep: P0 (low back beside hip) -> P1 (low forward) -> P2 (forward & upward toss)
+        rX = quadBezier(+0.14, +0.10, -0.04, w);
+        rY = quadBezier(-0.44, -0.38, -0.04, w);
+        rZ = quadBezier(+0.28, -0.30, -0.48, w);
+        rPoleX = +0.55;
+        rPoleY = -0.55;
+        rPoleZ = +0.60;
+        lX = THREE.MathUtils.lerp(-0.02, -0.12, w);
+        lY = THREE.MathUtils.lerp(-0.12, -0.28, w);
+        lZ = THREE.MathUtils.lerp(-0.34, +0.20, w);
+        lPoleX = -0.65;
+        lPoleY = -0.30;
+        lPoleZ = +0.60;
+      } else {
+        const fade = 1 - smoothstep01((t - followEnd) / Math.max(c.throwAnimDuration - followEnd, 0.001));
+        blend = fade;
+        torsoYaw = +0.24 * fade;
+        torsoPitch = -0.04 * fade;
+        rX = -0.04;
+        rY = -0.04;
+        rZ = -0.48;
+        rPoleX = +0.55;
+        rPoleY = -0.55;
+        rPoleZ = +0.60;
+        lX = -0.12;
+        lY = -0.28;
+        lZ = +0.20;
+        lPoleX = -0.65;
+        lPoleY = -0.30;
+        lPoleZ = +0.60;
+      }
+    } else {
+      // Impulse Booster (0.36s total: 0.00->0.06 tuck, 0.06->0.19 downward-outward thrust, 0.19->0.36 recovery)
+      const rel = c.throwReleaseTime; // 0.06s
+      const followEnd = 0.19;
+      if (t <= rel) {
+        const u = easeOutQuad(t / Math.max(rel, 0.001));
+        blend = u;
+        torsoYaw = 0;
+        torsoPitch = -0.14 * u;
+        rX = -0.02;
+        rY = -0.18;
+        rZ = -0.26;
+        lX = +0.02;
+        lY = -0.18;
+        lZ = -0.26;
+      } else if (t <= followEnd) {
+        const w = smoothstep01((t - rel) / Math.max(followEnd - rel, 0.001));
+        blend = 1.0;
+        torsoYaw = 0;
+        torsoPitch = THREE.MathUtils.lerp(-0.14, +0.16, w);
+        rX = THREE.MathUtils.lerp(-0.02, +0.28, w);
+        rY = THREE.MathUtils.lerp(-0.18, -0.38, w);
+        rZ = THREE.MathUtils.lerp(-0.26, +0.18, w);
+        lX = THREE.MathUtils.lerp(+0.02, -0.28, w);
+        lY = THREE.MathUtils.lerp(-0.18, -0.38, w);
+        lZ = THREE.MathUtils.lerp(-0.26, +0.18, w);
+      } else {
+        const fade = 1 - smoothstep01((t - followEnd) / Math.max(c.throwAnimDuration - followEnd, 0.001));
+        blend = fade;
+        torsoYaw = 0;
+        torsoPitch = +0.16 * fade;
+        rX = +0.28;
+        rY = -0.38;
+        rZ = +0.18;
+        lX = -0.28;
+        lY = -0.38;
+        lZ = +0.18;
+      }
+      rPoleX = +0.75;
+      rPoleY = +0.15;
+      rPoleZ = +0.65;
+      lPoleX = -0.75;
+      lPoleY = +0.15;
+      lPoleZ = +0.65;
+    }
+
+    if (blend <= 0.001) return;
+
+    root.updateMatrixWorld(true);
+    model.getWorldQuaternion(this.tmpThrowModelQuat);
+
+    // 1. Apply torso yaw (around hero +Y) & pitch (around hero +X) across Spine (35%) and Chest (65%)
+    const applyModelAxisRot = (
+      node: THREE.Object3D | null,
+      axisX: number,
+      axisY: number,
+      axisZ: number,
+      angleRad: number
+    ): void => {
+      if (!node || !node.parent || Math.abs(angleRad) < 0.0005) return;
+      this.tmpVecA.set(axisX, axisY, axisZ).applyQuaternion(this.tmpThrowModelQuat).normalize();
+      node.parent.getWorldQuaternion(this.tmpQuatA).invert();
+      this.tmpVecB.copy(this.tmpVecA).applyQuaternion(this.tmpQuatA).normalize();
+      this.tmpQuatB.setFromAxisAngle(this.tmpVecB, angleRad);
+      node.quaternion.premultiply(this.tmpQuatB).normalize();
+      node.updateMatrixWorld(true);
+    };
+
+    applyModelAxisRot(spineNode, 0, 1, 0, torsoYaw * 0.35);
+    applyModelAxisRot(spineNode, 1, 0, 0, torsoPitch * 0.35);
+    applyModelAxisRot(chestNode, 0, 1, 0, torsoYaw * 0.65);
+    applyModelAxisRot(chestNode, 1, 0, 0, torsoPitch * 0.65);
+
+    root.updateMatrixWorld(true);
+
+    // 2. Solve smooth blended 2-bone IK for Right & Left arms relative to live twisted shoulder positions
+    const solveThrowArm = (
+      upper: THREE.Object3D | null,
+      lower: THREE.Object3D | null,
+      hand: THREE.Object3D | null,
+      offX: number,
+      offY: number,
+      offZ: number,
+      poleX: number,
+      poleY: number,
+      poleZ: number
+    ): void => {
+      if (!upper || !lower || !hand) return;
+      upper.getWorldPosition(this.tmpThrowShoulder);
+      hand.getWorldPosition(this.tmpThrowCurHand);
+
+      this.tmpThrowTarget.set(offX, offY, offZ).applyQuaternion(this.tmpThrowModelQuat);
+      this.tmpThrowTarget.add(this.tmpThrowShoulder);
+
+      this.tmpIkTarget.lerpVectors(this.tmpThrowCurHand, this.tmpThrowTarget, blend);
+      this.tmpIkPole.set(poleX, poleY, poleZ).applyQuaternion(this.tmpThrowModelQuat).normalize();
+      this.solveTwoBoneIK(upper, lower, hand, this.tmpIkTarget, this.tmpIkPole);
+    };
+
+    solveThrowArm(upperArmRNode, lowerArmRNode, rightHandNode, rX, rY, rZ, rPoleX, rPoleY, rPoleZ);
+    solveThrowArm(upperArmLNode, lowerArmLNode, leftHandNode, lX, lY, lZ, lPoleX, lPoleY, lPoleZ);
   }
 
   /**
@@ -8050,15 +8500,16 @@ export class WorkspaceRoyaleEngine {
     this.undoProceduralBoneOffsets(c);
     c.hero.mixer.update(animDt);
 
-    // 5a/5b. Apply procedural GBike seated pose, athletic slide pose & upper-body vertical aim pitch, recording exact undo deltas
+    // 5a/5b. Apply procedural GBike seated pose, athletic slide pose, upper-body vertical aim pitch & utility throw pose, recording exact undo deltas
     const hasGBikePose = Boolean(riddenBike) && !c.skyDropping;
     const hasSlideBonePose = !hasGBikePose && c.slidePoseBlend > 0.001 && !c.skyDropping;
-    const trackAimPitch = !hasGBikePose && hasWeapon && (aimingNow || c.crouching) && !c.skyDropping && !c.isReloading;
+    const hasThrowAnim = !hasGBikePose && c.throwAnimStyle !== null && !c.skyDropping;
+    const trackAimPitch = !hasGBikePose && !hasThrowAnim && hasWeapon && (aimingNow || c.crouching) && !c.skyDropping && !c.isReloading;
     const targetAimPitch = trackAimPitch ? THREE.MathUtils.clamp(c.pitch, -0.65, 0.65) : 0;
     c.smoothAimPitch += (targetAimPitch - c.smoothAimPitch) * Math.min(1, animDt * 14);
     const hasAimPitchPose = !hasGBikePose && Math.abs(c.smoothAimPitch) > 0.001;
 
-    if (hasGBikePose || hasSlideBonePose || hasAimPitchPose) {
+    if (hasGBikePose || hasSlideBonePose || hasAimPitchPose || hasThrowAnim) {
       const {
         spineNode,
         chestNode,
@@ -8096,6 +8547,9 @@ export class WorkspaceRoyaleEngine {
         if (hasAimPitchPose) {
           this.applyUpperBodyAimPitch(c, c.smoothAimPitch);
         }
+        if (hasThrowAnim) {
+          this.applyUtilityThrowPose(c);
+        }
       }
 
       // Compute exact undo delta R = Q_pre * inv(Q_post) so R * Q_post === Q_pre before next mixer.update()
@@ -8127,8 +8581,23 @@ export class WorkspaceRoyaleEngine {
       this.syncGliderMountToHands(c);
     }
 
+    // 6b. Sync held 3D utility prop visibility (hide on Sky-Drop, Bus, GBike, or after throw release during follow-through)
+    if (c.heldUtilityMesh) {
+      c.heldUtilityMesh.visible =
+        !c.skyDropping &&
+        !c.inBus &&
+        !riddenBike &&
+        !(c.throwAnimStyle !== null && c.throwReleased);
+    }
+
     // 7. Two-handed Hand_R (WeaponSocket_R) -> Hand_L barrel alignment with smooth Reload mag-swap handoff
-    if (c.weaponInstance && !c.skyDropping && !riddenBike) {
+    if (c.weaponInstance) {
+      const showWeapon = !c.skyDropping && !riddenBike && c.throwAnimStyle === null;
+      if (c.weaponInstance.root.visible !== showWeapon) {
+        c.weaponInstance.root.visible = showWeapon;
+      }
+    }
+    if (c.weaponInstance && !c.skyDropping && !riddenBike && c.throwAnimStyle === null) {
       if (nextAnim === 'Reload') {
         // Exact Reload beat handoff matching build_characters.py 48f Reload:
         //   t ∈ [0.00, 0.04]: Beat 0 (two-handed Aim grip, weight = 1)
@@ -9845,6 +10314,7 @@ export class WorkspaceRoyaleEngine {
       }
       victim.sprinting = false;
       this.cancelReload(victim);
+      this.cancelUtilityThrow(victim);
       victim.hero.root.visible = false;
 
       this.vfx.spawnExplosion(
