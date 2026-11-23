@@ -21,14 +21,11 @@ import {
 /**
  * Production Cloudflare Workers realtime backend URL fallback.
  *
- * Leave empty until `worker/` is deployed (`wrangler deploy`), or override at
- * build time via `VITE_MP_SERVER_URL` (Cloudflare Pages environment variable)
- * or at runtime via `?server=wss://...`.
- *
- * Example once deployed:
- *   export const DEFAULT_PROD_MP_URL = 'wss://workspace-battle-royale-rt.<subdomain>.workers.dev';
+ * Can still be overridden at build time via `VITE_MP_SERVER_URL` (Cloudflare Pages
+ * environment variable), at runtime via `?server=wss://...`, or automatically via
+ * `ws://127.0.0.1:8787` when served on `localhost` / `127.0.0.1`.
  */
-export const DEFAULT_PROD_MP_URL = '';
+export const DEFAULT_PROD_MP_URL = 'wss://workspace-battle-royale.dyou3968.workers.dev';
 
 export const MP_NOT_CONFIGURED_MESSAGE = 'Multiplayer server URL not configured yet';
 
