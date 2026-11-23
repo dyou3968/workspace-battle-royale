@@ -1374,13 +1374,24 @@ export class TacticalMinimap {
       }
     }
 
-    // 3b. Rare & Epic Popped Ground Loot Pips
+    // 3b. Rare, Epic & Mythic Popped Ground Loot Pips
     for (const pip of state.loot) {
       if (pip.rarity === 'common') continue;
       const lx = proj.wx(pip.x);
       const ly = proj.wz(pip.z);
-      const sz = detailed ? (pip.rarity === 'epic' ? 3.8 : 3.0) : pip.rarity === 'epic' ? 2.1 : 1.65;
-      ctx.fillStyle = pip.rarity === 'epic' ? '#d8b4fe' : '#60a5fa';
+      const isMythic = pip.rarity === 'mythic';
+      const sz = detailed
+        ? isMythic
+          ? 4.8
+          : pip.rarity === 'epic'
+            ? 3.8
+            : 3.0
+        : isMythic
+          ? 2.8
+          : pip.rarity === 'epic'
+            ? 2.1
+            : 1.65;
+      ctx.fillStyle = isMythic ? '#fbbf24' : pip.rarity === 'epic' ? '#d8b4fe' : '#60a5fa';
       ctx.beginPath();
       ctx.moveTo(lx, ly - sz);
       ctx.lineTo(lx + sz, ly);
@@ -1388,6 +1399,11 @@ export class TacticalMinimap {
       ctx.lineTo(lx - sz, ly);
       ctx.closePath();
       ctx.fill();
+      if (isMythic) {
+        ctx.strokeStyle = '#fef08a';
+        ctx.lineWidth = detailed ? 1.25 : 0.85;
+        ctx.stroke();
+      }
     }
 
     // 3c. Rideable GBikes (Google Green circular pip + crisp white ring; handlebar/wheel glyph on Full Map)

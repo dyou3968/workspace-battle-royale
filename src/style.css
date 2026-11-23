@@ -44,6 +44,7 @@
   --rarity-common: #9AA0A6;
   --rarity-rare: #4285F4;
   --rarity-epic: #A855F7;
+  --rarity-mythic: #F59E0B;
   --hud-glass: rgba(24, 28, 36, 0.78);
   --hud-glass-strong: rgba(20, 24, 32, 0.88);
   --hud-border: rgba(255, 255, 255, 0.16);
@@ -3530,6 +3531,27 @@ input:focus-visible {
   color: #FEF7E0;
 }
 
+.kill-entry.mythic {
+  border-left-color: var(--rarity-mythic);
+  border-color: rgba(251, 191, 36, 0.55);
+  background: linear-gradient(135deg, rgba(66, 42, 8, 0.9), rgba(34, 24, 10, 0.88));
+  color: #FEF3C7;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.24);
+}
+
+.kill-mythic-tag {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.34), rgba(251, 191, 36, 0.24));
+  color: #FDE68A;
+  border: 1px solid rgba(251, 191, 36, 0.72);
+  text-shadow: 0 0 6px rgba(251, 191, 36, 0.45);
+}
+
 .kill-hs-tag {
   font-family: var(--font-mono);
   font-size: 9.5px;
@@ -3939,6 +3961,12 @@ input:focus-visible {
 .interact-prompt.chest-t1 { border-color: #F59E0B; color: #FDE68A; }
 .interact-prompt.chest-t2 { border-color: var(--g-blue-bright); color: #D3E3FD; }
 .interact-prompt.chest-t3 { border-color: #C084FC; color: #F3E8FF; }
+.interact-prompt.mythic {
+  border-color: #FBBF24;
+  color: #FEF3C7;
+  background: linear-gradient(135deg, rgba(78, 48, 8, 0.92), rgba(36, 24, 6, 0.9));
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.35);
+}
 .interact-prompt.techstop {
   border-color: var(--g-blue-bright);
   background: linear-gradient(135deg, rgba(16, 36, 74, 0.92), rgba(20, 28, 48, 0.92));
@@ -4482,6 +4510,27 @@ input:focus-visible {
   background: rgba(52, 24, 86, 0.82);
 }
 .hotbar-slot.rarity-epic::after { background: var(--rarity-epic); }
+
+@keyframes mythicGoldShimmer {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.38), inset 0 0 12px rgba(251, 191, 36, 0.2);
+    border-color: rgba(251, 191, 36, 0.95);
+  }
+  50% {
+    box-shadow: 0 0 18px rgba(251, 191, 36, 0.65), inset 0 0 16px rgba(254, 240, 138, 0.32);
+    border-color: #FEF08A;
+  }
+}
+
+.hotbar-slot.rarity-mythic {
+  border-color: rgba(251, 191, 36, 0.95);
+  background: linear-gradient(155deg, rgba(94, 58, 10, 0.9), rgba(46, 28, 6, 0.88));
+  animation: mythicGoldShimmer 2.4s ease-in-out infinite;
+}
+.hotbar-slot.rarity-mythic::after {
+  height: 4px;
+  background: linear-gradient(90deg, #D97706, #FBBF24, #FEF08A, #F59E0B);
+}
 
 .hotbar-slot.active {
   transform: translateY(-6px);

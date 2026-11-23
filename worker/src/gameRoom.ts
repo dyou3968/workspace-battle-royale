@@ -1708,7 +1708,7 @@ export class GameRoom extends DurableObject<Env> {
   ): void {
     if (this.phase !== 'playing' || !this.match) return;
     if (typeof msg.techStopId !== 'string' || !msg.techStopId) return;
-    if (!isValidWeaponId(msg.weaponId) || !isValidRarity(msg.newRarity)) return;
+    if (!isValidWeaponId(msg.weaponId) || (msg.newRarity !== 'rare' && msg.newRarity !== 'epic')) return;
 
     this.broadcast(
       {

@@ -36,7 +36,7 @@ export type MpUtilityItemId =
   | 'shield_drop'
   | 'regen_pod';
 
-export type MpRarity = 'common' | 'rare' | 'epic';
+export type MpRarity = 'common' | 'rare' | 'epic' | 'mythic';
 export type MpChestTier = 1 | 2 | 3;
 
 export const MP_HERO_IDS: readonly MpHeroId[] = [
@@ -70,7 +70,7 @@ export const MP_WEAPON_IDS: readonly MpWeaponId[] = [
   'nova_gl40',
 ];
 
-export const MP_RARITIES: readonly MpRarity[] = ['common', 'rare', 'epic'];
+export const MP_RARITIES: readonly MpRarity[] = ['common', 'rare', 'epic', 'mythic'];
 
 export const MP_MAX_PLAYERS = 20;
 export const MP_DROP_RING_COUNT = 20;

@@ -1470,9 +1470,9 @@ export class AssetManager {
     if (cached) return cached;
     const rarityCfg = RARITY_CONFIG[rarity];
     const mat = new THREE.MeshBasicMaterial({
-      color: rarityCfg.hex,
+      color: rarity === 'mythic' ? 0xfbbf24 : rarityCfg.hex,
       transparent: true,
-      opacity: rarity === 'epic' ? 0.92 : rarity === 'rare' ? 0.8 : 0.65,
+      opacity: rarity === 'mythic' ? 0.98 : rarity === 'epic' ? 0.92 : rarity === 'rare' ? 0.8 : 0.65,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
@@ -1485,9 +1485,9 @@ export class AssetManager {
     if (cached) return cached;
     const rarityCfg = RARITY_CONFIG[rarity];
     const mat = new THREE.MeshBasicMaterial({
-      color: rarityCfg.hex,
+      color: rarity === 'mythic' ? 0xfbbf24 : rarityCfg.hex,
       transparent: true,
-      opacity: rarity === 'epic' ? 0.24 : rarity === 'rare' ? 0.17 : 0.11,
+      opacity: rarity === 'mythic' ? 0.36 : rarity === 'epic' ? 0.24 : rarity === 'rare' ? 0.17 : 0.11,
       side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -1621,7 +1621,8 @@ export class AssetManager {
     ring.receiveShadow = false;
     root.add(ring);
 
-    const beamHeight = rarity === 'epic' ? 5.6 : rarity === 'rare' ? 4.2 : 2.9;
+    const beamHeight =
+      rarity === 'mythic' ? 5.6 * 1.65 : rarity === 'epic' ? 5.6 : rarity === 'rare' ? 4.2 : 2.9;
     const beamMat = this.getLootBeamMaterial(rarity);
     const beam = new THREE.Mesh(this.lootBeamGeo, beamMat);
     beam.scale.set(1, beamHeight, 1);

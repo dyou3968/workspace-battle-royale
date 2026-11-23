@@ -14,6 +14,8 @@ import {
   GAME_CONSTANTS,
   GAME_MODES,
   GAME_MODE_LIST,
+  getUtilityChannelTime,
+  getWeaponMagSize,
   HERO_MAP,
   PRODUCT_HEROES,
   RARITY_CONFIG,
@@ -1475,9 +1477,10 @@ function spawnFloatingDamage(event: FloatingDamageEvent): void {
 
 function pushKillFeed(entry: KillFeedEntry): void {
   const el = document.createElement('div');
-  el.className = `kill-entry${entry.headshot ? ' headshot' : ''}`;
+  el.className = `kill-entry${entry.headshot ? ' headshot' : ''}${entry.isMythic ? ' mythic' : ''}`;
 
   const badges: string[] = [];
+  if (entry.isMythic) badges.push('<span class="kill-mythic-tag">MYTHIC</span>');
   if (entry.headshot) badges.push('<span class="kill-hs-tag">HEADSHOT</span>');
   if (entry.isUltimate) badges.push('<span class="kill-ult-tag">ULT</span>');
 
@@ -1950,6 +1953,7 @@ function renderHud(state: HudSnapshot): void {
     interactPrompt.classList.toggle('chest-t3', pLower.includes('tier 3'));
     interactPrompt.classList.toggle('techstop', pLower.includes('techstop'));
     interactPrompt.classList.toggle('gbike', pLower.includes('gbike'));
+    interactPrompt.classList.toggle('mythic', pLower.includes('mythic'));
   } else {
     interactPrompt.classList.add('hidden');
   }
@@ -2017,14 +2021,15 @@ function renderHud(state: HudSnapshot): void {
       reloadBarWrap.classList.remove('hidden');
       setWidthCached(reloadBarFill, `${Math.max(0, Math.min(100, state.reloadProgress * 100)).toFixed(1)}%`);
     } else {
-      setTextCached(activeItemAmmo, `${active.ammo ?? 0} / ${w.magSize}`);
+      setTextCached(activeItemAmmo, `${active.ammo ?? 0} / ${getWeaponMagSize(w.id, active.rarity)}`);
       reloadBarWrap.classList.add('hidden');
     }
   } else {
     const it = UTILITY_ITEMS[active.id as UtilityItemId];
     setTextCached(activeItemName, `${RARITY_CONFIG[active.rarity].label} ${it.name}`);
     setActiveColor(RARITY_CONFIG[active.rarity].colorCss);
-    const channelTxt = it.channelTime > 0 ? ` · ${it.channelTime}s` : '';
+    const effChannel = getUtilityChannelTime(it.id, active.rarity);
+    const channelTxt = effChannel > 0 ? ` · ${effChannel}s` : '';
     setTextCached(activeItemAmmo, `x${active.count ?? 1}${channelTxt}`);
     reloadBarWrap.classList.add('hidden');
   }

@@ -124,6 +124,18 @@ export const RARITY_CONFIG: Record<Rarity, RarityConfig> = {
     standardWeight: 14,
     highTierWeight: 40,
   },
+  mythic: {
+    id: 'mythic',
+    label: 'Mythic',
+    colorCss: '#f59e0b',
+    hex: 0xfbbc04,
+    emissiveHex: 0xf59e0b,
+    emissiveIntensity: 1.25,
+    mult: 1.75,
+    reloadMult: 0.65,
+    standardWeight: 0,
+    highTierWeight: 0,
+  },
 };
 
 export const CHEST_TIER_CONFIG: Record<ChestTier, ChestTierConfig> = {
@@ -454,7 +466,7 @@ export const UTILITY_ITEMS: Record<UtilityItemId, UtilityItemDef> = {
     category: 'item',
     description: 'Fast mid-fight Shield energy top-up (1.5s channel).',
     baseAmount: 25,
-    amountsByRarity: { common: 25, rare: 32, epic: 40 },
+    amountsByRarity: { common: 25, rare: 32, epic: 40, mythic: 50 },
     channelTime: 1.5,
     maxStack: 4,
     color: 0x38bdf8,
@@ -469,7 +481,7 @@ export const UTILITY_ITEMS: Record<UtilityItemId, UtilityItemDef> = {
     category: 'item',
     description: 'Full Shield reset behind cover (3.0s channel).',
     baseAmount: 60,
-    amountsByRarity: { common: 60, rare: 75, epic: 100 },
+    amountsByRarity: { common: 60, rare: 75, epic: 100, mythic: 100 },
     channelTime: 3.0,
     maxStack: 2,
     color: 0x06b6d4,
@@ -484,7 +496,7 @@ export const UTILITY_ITEMS: Record<UtilityItemId, UtilityItemDef> = {
     category: 'item',
     description: 'Primary Health recovery trauma kit (2.8s channel).',
     baseAmount: 45,
-    amountsByRarity: { common: 45, rare: 65, epic: 100 },
+    amountsByRarity: { common: 45, rare: 65, epic: 100, mythic: 100 },
     channelTime: 2.8,
     maxStack: 3,
     color: 0x22c55e,
@@ -499,7 +511,7 @@ export const UTILITY_ITEMS: Record<UtilityItemId, UtilityItemDef> = {
     category: 'item',
     description: 'Accelerates Ultimate readiness (1.4s channel).',
     baseAmount: 45,
-    amountsByRarity: { common: 45, rare: 65, epic: 100 },
+    amountsByRarity: { common: 45, rare: 65, epic: 100, mythic: 100 },
     channelTime: 1.4,
     maxStack: 3,
     color: 0xa855f7,
@@ -514,7 +526,7 @@ export const UTILITY_ITEMS: Record<UtilityItemId, UtilityItemDef> = {
     category: 'item',
     description: 'Deploys a curved ballistic energy barrier anywhere (12 Mana, instant).',
     baseAmount: 240,
-    amountsByRarity: { common: 240, rare: 300, epic: 380 },
+    amountsByRarity: { common: 240, rare: 300, epic: 380, mythic: 520 },
     channelTime: 0,
     maxStack: 3,
     manaCost: 12,
@@ -530,7 +542,7 @@ export const UTILITY_ITEMS: Record<UtilityItemId, UtilityItemDef> = {
     category: 'item',
     description: 'Directional high-arc vertical/forward launch to scale roofs or disengage (10 Mana, instant).',
     baseAmount: 22,
-    amountsByRarity: { common: 22, rare: 26, epic: 30 },
+    amountsByRarity: { common: 22, rare: 26, epic: 30, mythic: 35 },
     channelTime: 0,
     maxStack: 3,
     manaCost: 10,
@@ -546,7 +558,7 @@ export const UTILITY_ITEMS: Record<UtilityItemId, UtilityItemDef> = {
     category: 'item',
     description: 'High-explosive fragmentation grenade with bouncing arc and blast radius (instant throw).',
     baseAmount: 85,
-    amountsByRarity: { common: 85, rare: 105, epic: 130 },
+    amountsByRarity: { common: 85, rare: 105, epic: 130, mythic: 160 },
     channelTime: 0,
     maxStack: 3,
     color: 0xea4335,
@@ -561,7 +573,7 @@ export const UTILITY_ITEMS: Record<UtilityItemId, UtilityItemDef> = {
     category: 'item',
     description: 'Concussion flash grenade that blinds and disorients rivals caught in the blast (instant throw).',
     baseAmount: 2.2,
-    amountsByRarity: { common: 2.2, rare: 2.8, epic: 3.4 },
+    amountsByRarity: { common: 2.2, rare: 2.8, epic: 3.4, mythic: 4.2 },
     channelTime: 0,
     maxStack: 3,
     color: 0xfef08a,
@@ -576,7 +588,7 @@ export const UTILITY_ITEMS: Record<UtilityItemId, UtilityItemDef> = {
     category: 'item',
     description: 'Throwable protective shield dome that blocks enemy fire and restores Shield inside (instant throw).',
     baseAmount: 8,
-    amountsByRarity: { common: 8, rare: 11, epic: 15 },
+    amountsByRarity: { common: 8, rare: 11, epic: 15, mythic: 20 },
     channelTime: 0,
     maxStack: 2,
     color: 0x38bdf8,
@@ -591,7 +603,7 @@ export const UTILITY_ITEMS: Record<UtilityItemId, UtilityItemDef> = {
     category: 'item',
     description: 'Throwable healing beacon that pulses continuous emerald Health regeneration in an area (instant throw).',
     baseAmount: 10,
-    amountsByRarity: { common: 10, rare: 13, epic: 17 },
+    amountsByRarity: { common: 10, rare: 13, epic: 17, mythic: 22 },
     channelTime: 0,
     maxStack: 2,
     color: 0x34a853,
@@ -742,12 +754,23 @@ export function getWeaponDamage(weaponId: WeaponId, rarity: Rarity): number {
   return Math.round(WEAPONS[weaponId].damage * RARITY_CONFIG[rarity].mult);
 }
 
+export function getWeaponMagSize(weaponId: WeaponId, rarity: Rarity): number {
+  return rarity === 'mythic' ? Math.ceil(WEAPONS[weaponId].magSize * 1.25) : WEAPONS[weaponId].magSize;
+}
+
 export function getWeaponReloadTime(weaponId: WeaponId, rarity: Rarity): number {
   return Number((WEAPONS[weaponId].reloadTime * RARITY_CONFIG[rarity].reloadMult).toFixed(2));
 }
 
 export function getUtilityAmount(utilityId: UtilityItemId, rarity: Rarity): number {
   return UTILITY_ITEMS[utilityId].amountsByRarity[rarity];
+}
+
+export function getUtilityChannelTime(itemId: UtilityItemId, rarity: Rarity): number {
+  const def = UTILITY_ITEMS[itemId];
+  return rarity === 'mythic' && def.channelTime > 0
+    ? Number((def.channelTime * 0.60).toFixed(2))
+    : def.channelTime;
 }
 
 export function rollRarity(highTier = false): Rarity {

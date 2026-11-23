@@ -116,8 +116,9 @@ export interface BotDecision {
 
 const RARITY_SCORE: Record<Rarity, number> = {
   common: 1,
-  rare: 2.1,
-  epic: 3.4,
+  rare: 2,
+  epic: 3,
+  mythic: 4,
 };
 
 export const BOT_DROP_IGNORE_SEC = 12.0;

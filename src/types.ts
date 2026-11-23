@@ -1,4 +1,4 @@
-export type Rarity = 'common' | 'rare' | 'epic';
+export type Rarity = 'common' | 'rare' | 'epic' | 'mythic';
 
 export type ChestTier = 1 | 2 | 3;
 
@@ -577,6 +577,7 @@ export interface KillFeedEntry {
   weapon: string;
   headshot: boolean;
   isUltimate?: boolean;
+  isMythic?: boolean;
   isStorm?: boolean;
   timestamp: number;
 }

@@ -954,6 +954,86 @@ export class VfxSystem {
     };
   }
 
+  /** Mythic Nova GL-40 Solar Surge golden plasma scorch zone (3.0s DoT hazard). */
+  public createSolarScorchZone(pos: THREE.Vector3, radius: number): PersistentZoneVisual {
+    const group = new THREE.Group();
+    group.position.copy(pos);
+
+    const outerRingMat = new THREE.MeshBasicMaterial({
+      color: 0xf59e0b,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const outerRing = new THREE.Mesh(this.unitRingGeo, outerRingMat);
+    outerRing.scale.setScalar(radius);
+    outerRing.position.y = 0.08;
+    group.add(outerRing);
+
+    const coreDiscGeo = new THREE.CircleGeometry(radius * 0.96, 28);
+    coreDiscGeo.rotateX(-Math.PI / 2);
+    const coreDiscMat = new THREE.MeshBasicMaterial({
+      color: 0xfbbf24,
+      transparent: true,
+      opacity: 0.24,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const coreDisc = new THREE.Mesh(coreDiscGeo, coreDiscMat);
+    coreDisc.position.y = 0.06;
+    group.add(coreDisc);
+
+    const emberMat = new THREE.MeshBasicMaterial({
+      color: 0xfef08a,
+      transparent: true,
+      opacity: 0.92,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const embers: { mesh: THREE.Mesh; angle: number; dist: number; phase: number; speed: number }[] = [];
+    const emberCount = 14;
+    for (let i = 0; i < emberCount; i++) {
+      const angle = (i / emberCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+      const dist = radius * (0.15 + Math.random() * 0.78);
+      const phase = Math.random();
+      const speed = 0.6 + Math.random() * 0.45;
+      const ember = new THREE.Mesh(this.sparkGeo, emberMat);
+      ember.position.set(Math.cos(angle) * dist, 0.15 + phase * 1.9, Math.sin(angle) * dist);
+      group.add(ember);
+      embers.push({ mesh: ember, angle, dist, phase, speed });
+    }
+
+    this.scene.add(group);
+    this.triggerFlashLight(pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 0xfbbf24, 9, radius * 2.4, 0.35);
+
+    return {
+      group,
+      update: (dt, elapsed, remaining) => {
+        const fade = remaining < 0.55 ? Math.max(0, remaining / 0.55) : 1;
+        const flicker = 0.82 + Math.sin(elapsed * 12.0) * 0.18;
+        outerRingMat.opacity = 0.9 * flicker * fade;
+        coreDiscMat.opacity = 0.24 * flicker * fade;
+        emberMat.opacity = 0.92 * fade;
+        for (const e of embers) {
+          e.phase = (e.phase + dt * e.speed) % 1;
+          e.angle += dt * 0.55;
+          e.mesh.position.set(Math.cos(e.angle) * e.dist, 0.12 + e.phase * 2.1, Math.sin(e.angle) * e.dist);
+          e.mesh.scale.setScalar(Math.max(0.05, Math.sin(e.phase * Math.PI) * 1.2));
+        }
+      },
+      dispose: () => {
+        this.scene.remove(group);
+        outerRingMat.dispose();
+        coreDiscGeo.dispose();
+        coreDiscMat.dispose();
+        emberMat.dispose();
+      },
+    };
+  }
+
   /** Gmail Ultimate homing explosive envelope missile visual. */
   public createGmailEnvelopeMissile(): THREE.Group {
     const group = new THREE.Group();

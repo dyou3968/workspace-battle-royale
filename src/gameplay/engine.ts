@@ -39,7 +39,9 @@ import {
   GAME_CONSTANTS,
   GAME_MODES,
   getUtilityAmount,
+  getUtilityChannelTime,
   getWeaponDamage,
+  getWeaponMagSize,
   getWeaponReloadTime,
   HERO_MAP,
   RARITY_CONFIG,
@@ -248,6 +250,7 @@ interface Combatant {
   reloadDuration: number;
   lastShotAt: number;
   semiAutoLatch: boolean;
+  mythicM4HitCount: number;
 
   ultCooldown: number;
   silencedSec: number;
@@ -319,6 +322,7 @@ interface Projectile {
   id: number;
   ownerId: string;
   weaponId?: WeaponId;
+  rarity?: Rarity;
   weaponName: string;
   isUltimate: boolean;
   kind: 'bullet' | 'grenade' | 'envelope';
@@ -428,6 +432,24 @@ interface DeployableFieldEntity {
   propMesh: THREE.Group;
   vitalsSyncAccum: number;
 }
+
+interface SolarScorchZone {
+  ownerId: string;
+  center: THREE.Vector3;
+  radius: number;
+  dps: number;
+  elapsed: number;
+  duration: number;
+  tickAccum: number;
+  visual: PersistentZoneVisual;
+}
+
+const RARITY_RANK: Record<Rarity, number> = {
+  common: 1,
+  rare: 2,
+  epic: 3,
+  mythic: 4,
+};
 
 interface SupplyDropEntity {
   id: string;
@@ -619,6 +641,7 @@ export class WorkspaceRoyaleEngine {
   private chronoZones: ChronoZone[] = [];
   private thrownUtilities: ThrownUtilityEntity[] = [];
   private deployableFields: DeployableFieldEntity[] = [];
+  private solarScorchZones: SolarScorchZone[] = [];
   private pendingBeams: PendingSlidesBeam[] = [];
   private supplyDrops: SupplyDropEntity[] = [];
   private worldGBikes: WorldGBike[] = [];
@@ -1654,6 +1677,7 @@ export class WorkspaceRoyaleEngine {
       reloadDuration: 1,
       lastShotAt: -10,
       semiAutoLatch: false,
+      mythicM4HitCount: 0,
       ultCooldown: 0,
       silencedSec: 0,
       blindedSec: 0,
@@ -1788,6 +1812,11 @@ export class WorkspaceRoyaleEngine {
       this.scene.remove(f.propMesh);
     }
     this.deployableFields.length = 0;
+
+    for (const sz of this.solarScorchZones) {
+      sz.visual.dispose();
+    }
+    this.solarScorchZones.length = 0;
 
     for (const s of this.supplyDrops) {
       this.scene.remove(s.root);
@@ -2649,18 +2678,65 @@ export class WorkspaceRoyaleEngine {
     }
   }
 
-  private computeSupplyDropLoot(drop: SupplyDropEntity): SyncedGroundLoot[] {
+  private computeSupplyDropLoot(
+    drop: SupplyDropEntity,
+    rngFn: () => number = Math.random
+  ): SyncedGroundLoot[] {
     const weaponId = rollSupplyDropWeapon(this.activeGameMode);
-    const healId: UtilityItemId = Math.random() < 0.55 ? 'shield_jug' : 'medkit';
+    const hasMythic = rngFn() < 0.85;
+    const mythicIsWeapon = hasMythic && rngFn() < 0.50;
+    const mythicIsUtility = hasMythic && !mythicIsWeapon;
 
-    const dropItems: { kind: 'weapon' | 'item'; id: WeaponId | UtilityItemId; count: number }[] = [
-      { kind: 'weapon', id: weaponId, count: 1 },
-      { kind: 'item', id: healId, count: 1 },
-      { kind: 'item', id: 'mana_elixir', count: 1 },
+    const mythicUtilPool: UtilityItemId[] = [
+      'shield_jug',
+      'medkit',
+      'frag_grenade',
+      'flashbang',
+      'shield_drop',
+      'regen_pod',
     ];
 
+    const dropItems: {
+      kind: 'weapon' | 'item';
+      id: WeaponId | UtilityItemId;
+      rarity: Rarity;
+      count: number;
+    }[] = [];
+
+    // Slot 0: Weapon (Mythic if mythicIsWeapon, otherwise Epic)
+    dropItems.push({
+      kind: 'weapon',
+      id: weaponId,
+      rarity: mythicIsWeapon ? 'mythic' : 'epic',
+      count: 1,
+    });
+
+    // Slot 1 & 2: Utilities (if mythicIsUtility, EXACTLY ONE high-impact utility is Mythic; all others stay Epic)
+    if (mythicIsUtility) {
+      const mythicUtilId = mythicUtilPool[Math.floor(rngFn() * mythicUtilPool.length)];
+      const mythicCount = mythicUtilId === 'frag_grenade' || mythicUtilId === 'flashbang' ? 2 : 1;
+      dropItems.push({
+        kind: 'item',
+        id: mythicUtilId,
+        rarity: 'mythic',
+        count: mythicCount,
+      });
+      const secondUtilId: UtilityItemId =
+        mythicUtilId === 'shield_jug' || mythicUtilId === 'medkit' ? 'mana_elixir' : 'shield_jug';
+      dropItems.push({
+        kind: 'item',
+        id: secondUtilId,
+        rarity: 'epic',
+        count: 1,
+      });
+    } else {
+      const healId: UtilityItemId = rngFn() < 0.55 ? 'shield_jug' : 'medkit';
+      dropItems.push({ kind: 'item', id: healId, rarity: 'epic', count: 1 });
+      dropItems.push({ kind: 'item', id: 'mana_elixir', rarity: 'epic', count: 1 });
+    }
+
     return dropItems.map((item, idx) => {
-      const ang = (idx / dropItems.length) * Math.PI * 2 + Math.random() * 0.5;
+      const ang = (idx / dropItems.length) * Math.PI * 2 + rngFn() * 0.5;
       const lx = drop.x + Math.cos(ang) * 2.1;
       const lz = drop.z + Math.sin(ang) * 2.1;
       const ly = this.physics.getSupportHeight(lx, lz, drop.y + 1.5, 0.3, 0.5);
@@ -2668,7 +2744,7 @@ export class WorkspaceRoyaleEngine {
         id: `${drop.id}_item_${idx}`,
         kind: item.kind,
         itemId: item.id,
-        rarity: 'epic',
+        rarity: item.rarity,
         count: item.count,
         x: Number(lx.toFixed(2)),
         y: Number(ly.toFixed(2)),
@@ -2715,12 +2791,24 @@ export class WorkspaceRoyaleEngine {
     }
 
     if (openerIsLocalPlayer) {
-      const mode = GAME_MODES[this.activeGameMode] ?? GAME_MODES.battle_royale;
-      const weaponLabel = mode.forceWeaponId ? WEAPONS[mode.forceWeaponId].name : 'Weapon';
-      this.callbacks.onAnnouncement(
-        'SUPPLY DROP OPENED',
-        `Epic ${weaponLabel} + Epic Shield/Medkit + Epic Mana Elixir!`
-      );
+      const mythicItem = syncedLoot.find((it) => it.rarity === 'mythic');
+      if (mythicItem) {
+        const mythicName =
+          mythicItem.kind === 'weapon'
+            ? WEAPONS[mythicItem.itemId as WeaponId]?.name ?? 'Weapon'
+            : UTILITY_ITEMS[mythicItem.itemId as UtilityItemId]?.name ?? 'Utility';
+        this.callbacks.onAnnouncement(
+          'MYTHIC SUPPLY DROP',
+          `Mythic ${mythicName} + Epic Support Gear!`
+        );
+      } else {
+        const mode = GAME_MODES[this.activeGameMode] ?? GAME_MODES.battle_royale;
+        const weaponLabel = mode.forceWeaponId ? WEAPONS[mode.forceWeaponId].name : 'Weapon';
+        this.callbacks.onAnnouncement(
+          'SUPPLY DROP OPENED',
+          `Epic ${weaponLabel} + Epic Shield/Medkit + Epic Mana Elixir!`
+        );
+      }
     }
   }
 
@@ -2834,7 +2922,15 @@ export class WorkspaceRoyaleEngine {
           }
         }
       }
-      const speedMult = mode.moveSpeedMult * chronoSpeedMult;
+      const activeSlotObj = c.slots[c.activeSlot];
+      const mythicVectorSpeedMult =
+        activeSlotObj &&
+        activeSlotObj.kind === 'weapon' &&
+        activeSlotObj.id === 'vector_9' &&
+        activeSlotObj.rarity === 'mythic'
+          ? 1.12
+          : 1.0;
+      const speedMult = mode.moveSpeedMult * chronoSpeedMult * mythicVectorSpeedMult;
       if (!inOwnChrono && c.hastedSec > 0.15) c.hastedSec = 0.15;
       if (!inEnemyChrono && c.slowedSec > 0.15) c.slowedSec = 0.15;
 
@@ -2901,7 +2997,7 @@ export class WorkspaceRoyaleEngine {
           }
           const slot = c.slots[c.activeSlot];
           if (slot && slot.kind === 'weapon') {
-            slot.ammo = WEAPONS[slot.id as WeaponId].magSize;
+            slot.ammo = getWeaponMagSize(slot.id as WeaponId, slot.rarity);
           }
         }
       }
@@ -4297,8 +4393,13 @@ export class WorkspaceRoyaleEngine {
       shooter.mana = Math.max(0, shooter.mana - weapon.manaPerShot);
     }
 
-    slot.ammo = (slot.ammo ?? weapon.magSize) - 1;
+    const isMythic = slot.rarity === 'mythic';
+    slot.ammo = (slot.ammo ?? getWeaponMagSize(weaponId, slot.rarity)) - 1;
     shooter.fireCooldown = 1 / Math.max(0.2, weapon.fireRate * fireRateMult);
+    if (isMythic && weaponId === 'longbow_308') {
+      // Mythic Longbow .308 Recon Bolt: +20% faster fire rate
+      shooter.fireCooldown /= 1.20;
+    }
     shooter.lastShotAt = this.matchElapsed;
 
     // Resolve exact world muzzle position from Blender MuzzlePoint socket
@@ -4325,12 +4426,16 @@ export class WorkspaceRoyaleEngine {
       baseDir.normalize();
     }
 
-    // Spread with ADS and Crouch (-45% spread) modifiers
+    // Spread with ADS, Crouch (-45% spread), and Mythic signature perks
     let spread = weapon.spread;
     if (shooter.isAds) spread *= weapon.adsSpreadMult;
     if (shooter.crouching) spread *= GAME_CONSTANTS.CROUCH_SPREAD_MULT;
+    if (isMythic && weaponId === 'vanguard_m4') spread *= 0.75;
+    if (isMythic && weaponId === 'breaker_12g') spread *= 0.80;
 
     const dmg = getWeaponDamage(weaponId, slot.rarity);
+    const coverDamageMult =
+      (weapon.coverDamageMult ?? 1.0) * (isMythic && weaponId === 'breaker_12g' ? 1.30 : 1.0);
 
     for (let i = 0; i < weapon.pellets; i++) {
       const shotDir = baseDir.clone();
@@ -4353,6 +4458,7 @@ export class WorkspaceRoyaleEngine {
           id: this.nextProjectileSeq++,
           ownerId: shooter.id,
           weaponId,
+          rarity: slot.rarity,
           weaponName: weapon.shortName,
           isUltimate: false,
           kind: 'grenade',
@@ -4362,11 +4468,11 @@ export class WorkspaceRoyaleEngine {
           damage: dmg,
           headshotMult: 1.0,
           coverDamageMult: weapon.coverDamageMult ?? 2.4,
-          splashRadius: weapon.splashRadius ?? 6.5,
+          splashRadius: (weapon.splashRadius ?? 6.5) * (isMythic ? 1.25 : 1.0),
           gravity: GAME_CONSTANTS.GRAVITY * (weapon.gravityScale ?? 0.65),
           age: 0,
           maxAge: 3.5,
-          color: weapon.color,
+          color: isMythic ? 0xfbbf24 : weapon.color,
           mesh,
         });
       } else {
@@ -4376,6 +4482,7 @@ export class WorkspaceRoyaleEngine {
           id: this.nextProjectileSeq++,
           ownerId: shooter.id,
           weaponId,
+          rarity: slot.rarity,
           weaponName: weapon.shortName,
           isUltimate: false,
           kind: 'bullet',
@@ -4384,12 +4491,16 @@ export class WorkspaceRoyaleEngine {
           vel,
           damage: dmg,
           headshotMult: weapon.headshotMult,
-          coverDamageMult: weapon.coverDamageMult ?? 1.0,
+          coverDamageMult,
           splashRadius: 0,
           gravity: weaponId === 'longbow_308' ? 2.2 : 0,
           age: 0,
           maxAge,
-          color: weaponId === 'longbow_308' ? 0xfef08a : RARITY_CONFIG[slot.rarity].hex,
+          color: isMythic
+            ? 0xfbbf24
+            : weaponId === 'longbow_308'
+              ? 0xfef08a
+              : RARITY_CONFIG[slot.rarity].hex,
         });
       }
     }
@@ -4398,7 +4509,7 @@ export class WorkspaceRoyaleEngine {
     this.vfx.spawnMuzzleFlash(
       muzzlePos,
       baseDir,
-      weaponId === 'nova_gl40' ? 0xc084fc : 0xffd166,
+      isMythic ? 0xfbbf24 : weaponId === 'nova_gl40' ? 0xc084fc : 0xffd166,
       weaponId === 'breaker_12g' || weaponId === 'longbow_308' ? 1.4 : 0.95
     );
 
@@ -4585,6 +4696,10 @@ export class WorkspaceRoyaleEngine {
             if (p.kind === 'bullet') {
               this.vfx.spawnTracer(p.prevPos, hitPoint, p.color, 0.032, 0.085);
             }
+            // Mythic Breaker 12G Shield Shredder: shreds Shield Drop protective domes!
+            if (p.rarity === 'mythic' && p.weaponId === 'breaker_12g') {
+              field.elapsed += 0.35 * 1.3;
+            }
             interceptedByDrive = true;
             break;
           }
@@ -4627,12 +4742,13 @@ export class WorkspaceRoyaleEngine {
       // Render crisp tracer segment for ballistic bullets
       if (p.kind === 'bullet') {
         const isSniper = p.weaponId === 'longbow_308';
+        const isMythic = p.rarity === 'mythic';
         this.vfx.spawnTracer(
           p.prevPos,
           hitPoint,
           p.color,
-          isSniper ? 0.055 : 0.028,
-          isSniper ? 0.28 : 0.095
+          isSniper ? (isMythic ? 0.062 : 0.055) : isMythic ? 0.036 : 0.028,
+          isSniper ? (isMythic ? 0.32 : 0.28) : isMythic ? 0.125 : 0.095
         );
       }
 
@@ -4644,6 +4760,8 @@ export class WorkspaceRoyaleEngine {
           this.applyCombatDamage(hitTarget, projOwner, finalDmg, {
             headshot: hitHeadshot,
             weaponName: p.weaponName,
+            weaponId: p.weaponId,
+            weaponRarity: p.rarity,
             isUltimate: p.isUltimate,
             hitPoint,
           });
@@ -4666,8 +4784,26 @@ export class WorkspaceRoyaleEngine {
   }
 
   private detonateSplash(center: THREE.Vector3, proj: Projectile): void {
-    const color = proj.kind === 'envelope' ? 0xea4335 : 0xc084fc;
+    const isMythicNova = proj.kind === 'grenade' && proj.weaponId === 'nova_gl40' && proj.rarity === 'mythic';
+    const color = proj.kind === 'envelope' ? 0xea4335 : isMythicNova ? 0xfbbf24 : 0xc084fc;
     this.vfx.spawnExplosion(center, proj.splashRadius, color);
+
+    // Mythic Nova GL-40 Solar Surge: spawns a 3.0s golden plasma scorch zone dealing 12 DPS (r = 5.2m)
+    if (isMythicNova) {
+      const groundY = this.physics.getSupportHeight(center.x, center.z, center.y + 1.2, 0.3, 0.5);
+      const zonePos = new THREE.Vector3(center.x, groundY, center.z);
+      const scorchRadius = 5.2;
+      this.solarScorchZones.push({
+        ownerId: proj.ownerId,
+        center: zonePos,
+        radius: scorchRadius,
+        dps: 12,
+        elapsed: 0,
+        duration: 3.0,
+        tickAccum: 0,
+        visual: this.vfx.createSolarScorchZone(zonePos, scorchRadius),
+      });
+    }
 
     const listenerPos = this.getCameraFocusPos();
     const distToPlayer = center.distanceTo(listenerPos);
@@ -4722,6 +4858,8 @@ export class WorkspaceRoyaleEngine {
         this.applyCombatDamage(target, attacker, dmg, {
           headshot: false,
           weaponName: proj.weaponName,
+          weaponId: proj.weaponId,
+          weaponRarity: proj.rarity,
           isUltimate: proj.isUltimate,
           hitPoint: bodyCenter.clone(),
         });
@@ -4748,12 +4886,37 @@ export class WorkspaceRoyaleEngine {
     meta: {
       headshot: boolean;
       weaponName: string;
+      weaponId?: WeaponId;
+      weaponRarity?: Rarity;
       isUltimate: boolean;
       hitPoint: THREE.Vector3;
     }
   ): void {
     if (!victim.alive || amount <= 0) return;
     if (this.isFriendly(attacker, victim)) return;
+
+    const isMythicWeapon = meta.weaponRarity === 'mythic' && !meta.isUltimate;
+    // Mythic Breaker 12G Shield Shredder: +30% bonus damage when victim has Shield > 0
+    if (isMythicWeapon && meta.weaponId === 'breaker_12g' && victim.shield > 0) {
+      amount = Math.round(amount * 1.30);
+    }
+
+    // Apply Mythic on-hit perks (Mana bonus, M4 Shield Siphon, Longbow Recon Bolt)
+    if (attacker && attacker.id !== victim.id && !meta.isUltimate) {
+      const baseManaGain = Math.max(1.5, Math.min(8, amount * 0.12));
+      const manaGain = baseManaGain * (isMythicWeapon ? 1.35 : 1.0);
+      attacker.mana = Math.min(GAME_CONSTANTS.MAX_MANA, attacker.mana + manaGain);
+
+      if (isMythicWeapon && meta.weaponId === 'vanguard_m4') {
+        attacker.mythicM4HitCount += 1;
+        if (attacker.mythicM4HitCount % 4 === 0) {
+          attacker.shield = Math.min(GAME_CONSTANTS.MAX_SHIELD, attacker.shield + 10);
+        }
+      }
+      if (isMythicWeapon && meta.weaponId === 'longbow_308') {
+        victim.revealedSec = Math.max(victim.revealedSec, 3.0);
+      }
+    }
 
     // Server-authoritative combat routing in Multiplayer
     if (this.mpActive) {
@@ -4848,7 +5011,15 @@ export class WorkspaceRoyaleEngine {
     }
 
     if (killed) {
-      this.handleElimination(victim, attacker, meta.weaponName, meta.headshot, meta.isUltimate, false);
+      this.handleElimination(
+        victim,
+        attacker,
+        meta.weaponName,
+        meta.headshot,
+        meta.isUltimate,
+        false,
+        isMythicWeapon
+      );
     }
   }
 
@@ -4878,7 +5049,8 @@ export class WorkspaceRoyaleEngine {
     weaponName: string,
     headshot: boolean,
     isUltimate: boolean,
-    isStorm: boolean
+    isStorm: boolean,
+    isMythic = false
   ): void {
     if (!victim.alive) return;
     const aliveBefore = this.combatants.filter((c) => c.alive).length;
@@ -4908,18 +5080,17 @@ export class WorkspaceRoyaleEngine {
     // Drop victim's actual looted gear on death (highest-rarity weapon + carried utility items)
     let bestWeapon: InventorySlot | null = null;
     const carriedItems: InventorySlot[] = [];
-    const rarityRank: Record<Rarity, number> = { common: 1, rare: 2, epic: 3 };
     for (const s of victim.slots) {
       if (!s) continue;
       if (s.kind === 'weapon') {
-        if (!bestWeapon || rarityRank[s.rarity] > rarityRank[bestWeapon.rarity]) {
+        if (!bestWeapon || RARITY_RANK[s.rarity] > RARITY_RANK[bestWeapon.rarity]) {
           bestWeapon = s;
         }
       } else if ((s.count ?? 0) > 0) {
         carriedItems.push(s);
       }
     }
-    carriedItems.sort((a, b) => rarityRank[b.rarity] - rarityRank[a.rarity]);
+    carriedItems.sort((a, b) => RARITY_RANK[b.rarity] - RARITY_RANK[a.rarity]);
 
     const deathDrops: { kind: 'weapon' | 'item'; id: WeaponId | UtilityItemId; rarity: Rarity; count: number }[] = [];
     if (bestWeapon) {
@@ -4942,6 +5113,17 @@ export class WorkspaceRoyaleEngine {
     if (killer && killer.id !== victim.id) {
       killer.eliminations++;
       killer.mana = Math.min(GAME_CONSTANTS.MAX_MANA, killer.mana + GAME_CONSTANTS.ELIM_MANA_BONUS);
+      // Mythic Vector-9 Kinetic Rush: instant full magazine refill on Elimination!
+      const activeKillerSlot = killer.slots[killer.activeSlot];
+      if (
+        activeKillerSlot &&
+        activeKillerSlot.kind === 'weapon' &&
+        activeKillerSlot.id === 'vector_9' &&
+        activeKillerSlot.rarity === 'mythic'
+      ) {
+        activeKillerSlot.ammo = getWeaponMagSize('vector_9', 'mythic');
+        if (killer.isReloading) this.cancelReload(killer);
+      }
       this.audio.playElimination(killer.isPlayer);
     } else {
       this.audio.playElimination(false);
@@ -4956,6 +5138,7 @@ export class WorkspaceRoyaleEngine {
       weapon: weaponName,
       headshot,
       isUltimate,
+      isMythic,
       isStorm,
       timestamp: this.matchElapsed,
     });
@@ -5435,7 +5618,7 @@ export class WorkspaceRoyaleEngine {
     caster.sprinting = false;
     const slot = caster.slots[caster.activeSlot];
     if (slot && slot.kind === 'weapon') {
-      slot.ammo = WEAPONS[slot.id as WeaponId].magSize;
+      slot.ammo = getWeaponMagSize(slot.id as WeaponId, slot.rarity);
     }
 
     caster.rewind = {
@@ -5575,7 +5758,8 @@ export class WorkspaceRoyaleEngine {
             changed = true;
           }
           if (c.mana < GAME_CONSTANTS.MAX_MANA) {
-            c.mana = Math.min(GAME_CONSTANTS.MAX_MANA, c.mana + 5.0 * dt);
+            const manaRate = f.rarity === 'mythic' ? 9.0 : 5.0;
+            c.mana = Math.min(GAME_CONSTANTS.MAX_MANA, c.mana + manaRate * dt);
             changed = true;
           }
         }
@@ -5588,6 +5772,42 @@ export class WorkspaceRoyaleEngine {
             shield: Math.round(c.shield),
             mana: Math.round(c.mana),
           });
+        }
+      }
+    }
+
+    // Mythic Nova GL-40 Solar Surge scorch zones (3.0s, 12 DPS to enemies inside r = 5.2m)
+    for (let i = this.solarScorchZones.length - 1; i >= 0; i--) {
+      const sz = this.solarScorchZones[i];
+      sz.elapsed += dt;
+      const rem = sz.duration - sz.elapsed;
+      sz.visual.update(dt, sz.elapsed, rem);
+      if (rem <= 0) {
+        sz.visual.dispose();
+        this.solarScorchZones.splice(i, 1);
+        continue;
+      }
+
+      sz.tickAccum += dt;
+      if (sz.tickAccum >= 0.5) {
+        const tickDmg = Math.round(sz.dps * sz.tickAccum);
+        sz.tickAccum = 0;
+        const owner = this.combatants.find((c) => c.id === sz.ownerId) ?? null;
+        for (const target of this.combatants) {
+          if (!target.alive || target.skyDropping || target.rewind.active) continue;
+          if (target.id === sz.ownerId || this.isFriendly(owner, target)) continue;
+          const horizDist = Math.hypot(target.pos.x - sz.center.x, target.pos.z - sz.center.z);
+          const vertDiff = Math.abs(target.pos.y - sz.center.y);
+          if (horizDist <= sz.radius && vertDiff <= 3.0) {
+            this.applyCombatDamage(target, owner, tickDmg, {
+              headshot: false,
+              weaponName: 'Solar Surge',
+              weaponId: 'nova_gl40',
+              weaponRarity: 'mythic',
+              isUltimate: false,
+              hitPoint: new THREE.Vector3(target.pos.x, target.pos.y + 0.9, target.pos.z),
+            });
+          }
         }
       }
     }
@@ -5624,12 +5844,27 @@ export class WorkspaceRoyaleEngine {
       return;
     }
 
-    // Don't waste full-stat heals
-    if ((itemId === 'shield_cell' || itemId === 'shield_jug') && c.shield >= GAME_CONSTANTS.MAX_SHIELD) {
+    // Don't waste full-stat heals (Mythic Shield Jug also grants +20 HP; Mythic Medkit also grants +20 Shield)
+    if (
+      itemId === 'shield_cell' &&
+      c.shield >= GAME_CONSTANTS.MAX_SHIELD
+    ) {
       if (c.isPlayer) this.callbacks.onAnnouncement('SHIELD FULL', 'Your Shield is already at 100');
       return;
     }
-    if (itemId === 'medkit' && c.health >= GAME_CONSTANTS.MAX_HEALTH) {
+    if (
+      itemId === 'shield_jug' &&
+      c.shield >= GAME_CONSTANTS.MAX_SHIELD &&
+      !(slot.rarity === 'mythic' && c.health < GAME_CONSTANTS.MAX_HEALTH)
+    ) {
+      if (c.isPlayer) this.callbacks.onAnnouncement('SHIELD FULL', 'Your Shield is already at 100');
+      return;
+    }
+    if (
+      itemId === 'medkit' &&
+      c.health >= GAME_CONSTANTS.MAX_HEALTH &&
+      !(slot.rarity === 'mythic' && c.shield < GAME_CONSTANTS.MAX_SHIELD)
+    ) {
       if (c.isPlayer) this.callbacks.onAnnouncement('HEALTH FULL', 'Your Health is already at 100');
       return;
     }
@@ -5688,7 +5923,7 @@ export class WorkspaceRoyaleEngine {
       itemId,
       rarity: slot.rarity,
       elapsed: 0,
-      duration: def.channelTime,
+      duration: getUtilityChannelTime(itemId, slot.rarity),
     };
     if (c.isPlayer) {
       this.audio.playChannelStart(itemId);
@@ -5736,12 +5971,13 @@ export class WorkspaceRoyaleEngine {
         slot &&
         slot.kind === 'weapon' &&
         slot.rarity !== 'epic' &&
+        slot.rarity !== 'mythic' &&
         c.mana >= ch.manaCost
       ) {
         const wDef = WEAPONS[slot.id as WeaponId];
         c.mana = Math.max(0, c.mana - ch.manaCost);
         slot.rarity = ch.targetRarity;
-        slot.ammo = wDef.magSize;
+        slot.ammo = getWeaponMagSize(wDef.id, slot.rarity);
         this.syncEquippedWeaponVisual(c);
 
         const ts = this.world?.techStops.find((t) => t.id === ch.techStopId);
@@ -5774,13 +6010,19 @@ export class WorkspaceRoyaleEngine {
       let color = 0x38bdf8;
       if (ch.itemId === 'shield_cell' || ch.itemId === 'shield_jug') {
         c.shield = Math.min(GAME_CONSTANTS.MAX_SHIELD, c.shield + amount);
-        color = 0x38bdf8;
+        if (ch.itemId === 'shield_jug' && ch.rarity === 'mythic') {
+          c.health = Math.min(GAME_CONSTANTS.MAX_HEALTH, c.health + 20);
+        }
+        color = ch.rarity === 'mythic' ? 0xfbbf24 : 0x38bdf8;
       } else if (ch.itemId === 'medkit') {
         c.health = Math.min(GAME_CONSTANTS.MAX_HEALTH, c.health + amount);
-        color = 0x22c55e;
+        if (ch.rarity === 'mythic') {
+          c.shield = Math.min(GAME_CONSTANTS.MAX_SHIELD, c.shield + 20);
+        }
+        color = ch.rarity === 'mythic' ? 0xfbbf24 : 0x22c55e;
       } else if (ch.itemId === 'mana_elixir') {
         c.mana = Math.min(GAME_CONSTANTS.MAX_MANA, c.mana + amount);
-        color = 0xa855f7;
+        color = ch.rarity === 'mythic' ? 0xfbbf24 : 0xa855f7;
       }
 
       this.consumeSlotItem(c, ch.slotIndex);
@@ -6009,11 +6251,13 @@ export class WorkspaceRoyaleEngine {
     pos: THREE.Vector3
   ): void {
     const owner = this.combatants.find((c) => c.id === ownerId) ?? null;
-    const radius = itemId === 'shield_drop' ? 4.6 : 5.2;
-    const duration = 10.0;
+    const isMythic = rarity === 'mythic';
+    const radius =
+      itemId === 'shield_drop' ? (isMythic ? 5.6 : 4.6) : isMythic ? 6.4 : 5.2;
+    const duration = isMythic ? 14.0 : 10.0;
     const ratePerSec = getUtilityAmount(itemId, rarity);
 
-    let teamColor = 0x38bdf8;
+    let teamColor = isMythic ? 0xfbbf24 : 0x38bdf8;
     if (itemId === 'shield_drop' && owner?.teamId) {
       teamColor = TEAM_CONFIG[owner.teamId].hex;
     }
@@ -6140,8 +6384,9 @@ export class WorkspaceRoyaleEngine {
   }
 
   private detonateFragGrenade(u: ThrownUtilityEntity): void {
-    const blastRadius = 7.5;
-    this.vfx.spawnExplosion(u.pos, blastRadius, 0xea4335);
+    const isMythic = u.rarity === 'mythic';
+    const blastRadius = isMythic ? 9.4 : 7.5;
+    this.vfx.spawnExplosion(u.pos, blastRadius, isMythic ? 0xfbbf24 : 0xea4335);
 
     const listenerPos = this.getCameraFocusPos();
     const distToCam = u.pos.distanceTo(listenerPos);
@@ -6170,6 +6415,7 @@ export class WorkspaceRoyaleEngine {
         this.applyCombatDamage(target, attacker, dmg, {
           headshot: false,
           weaponName: 'Frag Grenade',
+          weaponRarity: u.rarity,
           isUltimate: false,
           hitPoint: bodyCenter.clone(),
         });
@@ -6178,7 +6424,7 @@ export class WorkspaceRoyaleEngine {
   }
 
   private detonateFlashbang(u: ThrownUtilityEntity): void {
-    const flashRadius = 13.0;
+    const flashRadius = u.rarity === 'mythic' ? 16.0 : 13.0;
     this.vfx.spawnFlashbangBurst(u.pos);
 
     const attacker = this.combatants.find((c) => c.id === u.ownerId) ?? null;
@@ -6410,6 +6656,14 @@ export class WorkspaceRoyaleEngine {
         reason: enough ? undefined : 'low_mana',
       };
     }
+    if (slot.rarity === 'mythic') {
+      return {
+        prompt: `TechStop: ${wDef.name} is Mythic Tier (Max)`,
+        canUpgrade: false,
+        weaponName: wDef.name,
+        reason: 'max_tier',
+      };
+    }
     return {
       prompt: `TechStop: ${wDef.name} is Max Tier (Epic)`,
       canUpgrade: false,
@@ -6634,7 +6888,7 @@ export class WorkspaceRoyaleEngine {
       return false;
     }
 
-    const rarityRank: Record<Rarity, number> = { common: 1, rare: 2, epic: 3 };
+    const rarityRank = RARITY_RANK;
 
     if (loot.kind === 'item') {
       const uDef = UTILITY_ITEMS[loot.itemId as UtilityItemId];
@@ -6727,7 +6981,7 @@ export class WorkspaceRoyaleEngine {
     const hadAnyWeapon = c.slots.some((s) => s !== null && s.kind === 'weapon');
     const activeWasEmpty = c.slots[c.activeSlot] === null;
 
-    const rarityRank: Record<Rarity, number> = { common: 1, rare: 2, epic: 3 };
+    const rarityRank = RARITY_RANK;
     let placed = false;
     let placedSlotIdx = -1;
 
@@ -6757,7 +7011,7 @@ export class WorkspaceRoyaleEngine {
         const s = c.slots[i];
         if (s && s.kind === 'weapon' && s.id === loot.itemId && rarityRank[loot.rarity] > rarityRank[s.rarity]) {
           s.rarity = loot.rarity;
-          s.ammo = WEAPONS[loot.itemId as WeaponId].magSize;
+          s.ammo = getWeaponMagSize(loot.itemId as WeaponId, loot.rarity);
           placed = true;
           placedSlotIdx = i;
           break;
@@ -6775,7 +7029,7 @@ export class WorkspaceRoyaleEngine {
                 kind: 'weapon',
                 id: loot.itemId,
                 rarity: loot.rarity,
-                ammo: WEAPONS[loot.itemId as WeaponId].magSize,
+                ammo: getWeaponMagSize(loot.itemId as WeaponId, loot.rarity),
               }
             : {
                 kind: 'item',
@@ -6858,7 +7112,7 @@ export class WorkspaceRoyaleEngine {
               kind: 'weapon',
               id: loot.itemId,
               rarity: loot.rarity,
-              ammo: WEAPONS[loot.itemId as WeaponId].magSize,
+              ammo: getWeaponMagSize(loot.itemId as WeaponId, loot.rarity),
             }
           : {
               kind: 'item',
@@ -6951,7 +7205,7 @@ export class WorkspaceRoyaleEngine {
     const slot = c.slots[c.activeSlot];
     if (!slot || slot.kind !== 'weapon') return;
     const wDef = WEAPONS[slot.id as WeaponId];
-    if ((slot.ammo ?? 0) >= wDef.magSize) return;
+    if ((slot.ammo ?? 0) >= getWeaponMagSize(wDef.id, slot.rarity)) return;
     if (c.channel) this.cancelChannel(c);
     // Direction A: immediately drop out of sprint and latch Shift so holding Shift+W doesn't cancel reload on next frame
     c.sprinting = false;
@@ -9136,7 +9390,7 @@ export class WorkspaceRoyaleEngine {
           kind: 'weapon',
           id: t.weaponId,
           rarity,
-          ammo: WEAPONS[t.weaponId].magSize,
+          ammo: getWeaponMagSize(t.weaponId, rarity),
         };
       }
       c.activeSlot = 0;
@@ -9605,7 +9859,7 @@ export class WorkspaceRoyaleEngine {
       if (ownsDeathDrop) {
         let bestWeapon: InventorySlot | null = null;
         const carriedItems: InventorySlot[] = [];
-        const rarityRank: Record<Rarity, number> = { common: 1, rare: 2, epic: 3 };
+        const rarityRank = RARITY_RANK;
         for (const s of victim.slots) {
           if (!s) continue;
           if (s.kind === 'weapon') {
@@ -9657,6 +9911,16 @@ export class WorkspaceRoyaleEngine {
     if (killer && victim && killer.id !== victim.id) {
       killer.eliminations++;
       killer.mana = Math.min(GAME_CONSTANTS.MAX_MANA, killer.mana + GAME_CONSTANTS.ELIM_MANA_BONUS);
+      const activeKillerSlot = killer.slots[killer.activeSlot];
+      if (
+        activeKillerSlot &&
+        activeKillerSlot.kind === 'weapon' &&
+        activeKillerSlot.id === 'vector_9' &&
+        activeKillerSlot.rarity === 'mythic'
+      ) {
+        activeKillerSlot.ammo = getWeaponMagSize('vector_9', 'mythic');
+        if (killer.isReloading) this.cancelReload(killer);
+      }
       this.audio.playElimination(killer.isPlayer);
     } else {
       this.audio.playElimination(false);
