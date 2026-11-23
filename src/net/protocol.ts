@@ -76,6 +76,17 @@ export const MP_MAX_PLAYERS = 20;
 export const MP_DROP_RING_COUNT = 20;
 export const MP_STORM_ANCHOR_COUNT = 12;
 
+export const BOT_ROLE_PREFIXES = ['Googler', 'Doogler', 'Noogler'] as const;
+
+export function makeBotCallsign(index: number): string {
+  const prefix = BOT_ROLE_PREFIXES[index % BOT_ROLE_PREFIXES.length];
+  return `${prefix} ${index + 1}`;
+}
+
+export function isNooglerName(name: string): boolean {
+  return name.startsWith('Noogler');
+}
+
 export const MP_BOT_CALLSIGNS: Record<MpHeroId, readonly string[]> = {
   gmail: ['Gmail-AI·01', 'Inbox-AI·04', 'Priority-AI·13', 'Mail-AI·19'],
   drive: ['Drive-AI·02', 'Vault-AI·05', 'Cloud-AI·14', 'Share-AI·20'],
@@ -134,6 +145,7 @@ export interface RoomMember {
   ready: boolean;
   isHost: boolean;
   connected: boolean;
+  nooglerHat?: boolean;
 }
 
 export interface RoomLobbySnapshot {
@@ -153,6 +165,7 @@ export interface MatchCombatantSpec {
   teamId: TeamId | null;
   dropIndex: number;
   botTier?: MpBotTier;
+  nooglerHat?: boolean;
 }
 
 export interface MatchStartPayload {
@@ -333,6 +346,7 @@ export type ClientMessage =
       name: string;
       heroId: MpHeroId;
       teamId?: TeamId;
+      nooglerHat?: boolean;
     }
   | {
       type: 'update_profile';
@@ -340,6 +354,7 @@ export type ClientMessage =
       heroId?: MpHeroId;
       teamId?: TeamId;
       ready?: boolean;
+      nooglerHat?: boolean;
     }
   | {
       type: 'update_settings';

@@ -5,7 +5,7 @@ export const BOT_PROFILES: Record<BotTier, BotDifficultyProfile> = {
     tier: 'casual',
     label: 'Casual (Intern)',
     shortLabel: 'Casual',
-    description: 'Relaxed aim scatter (±2.4m), slower 550ms reaction, fights in the open, late storm rotation.',
+    description: 'Relaxed aim scatter (±2.4m), slower 550ms reaction, fights in the open, late OKR Deadlines rotation.',
     aimErrorRad: 0.082,
     aimScatterMeters: 2.4,
     leadFactor: 0.15,

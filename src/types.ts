@@ -390,6 +390,7 @@ export interface GameSettings {
   adsSensitivity: number;     // 0.4..2.0 (default 1.0)
   invertY: boolean;           // default false
   visualSoundCompass?: boolean; // default true
+  nooglerHat?: boolean;       // default false
 }
 
 export interface PerfStats {

@@ -108,6 +108,8 @@ import {
   FLAG_SKYDROPPING,
   FLAG_SLIDING,
   FLAG_SPRINTING,
+  isNooglerName,
+  makeBotCallsign,
   MatchEndPayload,
   MatchStartPayload,
   PeerStateUpdate,
@@ -199,6 +201,7 @@ interface Combatant {
   isRemoteHuman: boolean;
   teamId: TeamId | null;
   heroId: ProductHeroId;
+  nooglerHat: boolean;
   botTier?: BotTier;
   brain?: BotBrain;
   netTarget?: RemoteNetTarget;
@@ -510,15 +513,6 @@ interface SoundEventRecord {
   ttl: number;
   weight: number;
 }
-
-const BOT_CALLSIGNS: Record<ProductHeroId, string[]> = {
-  gmail: ['Gmail-AI·01', 'Inbox-AI·04', 'Priority-AI·13', 'Mail-AI·19'],
-  drive: ['Drive-AI·02', 'Vault-AI·05', 'Cloud-AI·14', 'Share-AI·20'],
-  calendar: ['Calendar-AI·03', 'Chrono-AI·06', 'Block-AI·15', 'Event-AI·21'],
-  chat: ['Chat-AI·07', 'Ping-AI·08', 'Thread-AI·16', 'Space-AI·22'],
-  slides: ['Slides-AI·09', 'Deck-AI·10', 'Laser-AI·17', 'Stage-AI·23'],
-  docs: ['Docs-AI·11', 'Draft-AI·12', 'Version-AI·18', 'Edit-AI·24'],
-};
 
 const ALL_HERO_IDS: ProductHeroId[] = ['gmail', 'drive', 'calendar', 'chat', 'slides', 'docs'];
 
@@ -1401,6 +1395,10 @@ export class WorkspaceRoyaleEngine {
         isRemoteHuman,
         teamId,
         heroId: spec.heroId,
+        nooglerHat:
+          typeof spec.nooglerHat === 'boolean'
+            ? spec.nooglerHat
+            : !spec.isHuman && isNooglerName(spec.name),
         botTier,
         brain,
         botIndex: !spec.isHuman ? botIndex++ : undefined,
@@ -1457,7 +1455,8 @@ export class WorkspaceRoyaleEngine {
   public startMatch(
     heroId: ProductHeroId,
     botDifficulty: BotDifficulty,
-    modeId: GameModeId = 'battle_royale'
+    modeId: GameModeId = 'battle_royale',
+    nooglerHat = false
   ): void {
     this.detachMpSessionState();
     this.spectateActive = false;
@@ -1531,6 +1530,7 @@ export class WorkspaceRoyaleEngine {
       name: heroDef.personaName,
       isPlayer: true,
       heroId,
+      nooglerHat,
       x: gbus.startX,
       y: gbus.y - 1.2,
       z: gbus.startZ,
@@ -1543,20 +1543,10 @@ export class WorkspaceRoyaleEngine {
     const desiredBots = Math.max(0, mode.totalCombatants - 1);
     const botCount = desiredBots;
     const botTiers = assignBotTiers(effectiveDiff, botCount);
-    const nameCounters: Record<ProductHeroId, number> = {
-      gmail: 0,
-      drive: 0,
-      calendar: 0,
-      chat: 0,
-      slides: 0,
-      docs: 0,
-    };
 
     for (let i = 0; i < botCount; i++) {
       const bHeroId = ALL_HERO_IDS[i % ALL_HERO_IDS.length];
-      const names = BOT_CALLSIGNS[bHeroId];
-      const nIdx = nameCounters[bHeroId]++;
-      const botName = names[nIdx % names.length] + (nIdx >= names.length ? ` ${nIdx + 1}` : '');
+      const botName = makeBotCallsign(i);
       const tier = botTiers[i];
       const profile = getBotProfile(tier);
       this.spawnCombatant({
@@ -1564,6 +1554,7 @@ export class WorkspaceRoyaleEngine {
         name: botName,
         isPlayer: false,
         heroId: bHeroId,
+        nooglerHat: isNooglerName(botName),
         botTier: tier,
         brain: new BotBrain(profile, this.world.landmarks),
         botIndex: i,
@@ -1584,7 +1575,7 @@ export class WorkspaceRoyaleEngine {
     if (mode.id === 'blitz') {
       this.callbacks.onAnnouncement(
         'BLITZ ROYALE — GBUS DEPARTING',
-        'Press SPACE to Jump · 1.8× Faster Storm · Tier 2–3 Chests'
+        'Press SPACE to Jump · 1.8× Faster OKR Deadlines · Tier 2–3 Chests'
       );
     } else if (mode.id === 'sniper_showdown') {
       this.callbacks.onAnnouncement(
@@ -1594,7 +1585,7 @@ export class WorkspaceRoyaleEngine {
     } else if (mode.id === 'campus_practice') {
       this.callbacks.onAnnouncement(
         'CAMPUS FREE ROAM — GBUS TOUR',
-        'Press SPACE to Jump · No Storm · Explore the 3× Googleplex'
+        'Press SPACE to Jump · No OKR Deadlines · Explore the 3× Googleplex'
       );
     } else {
       this.callbacks.onAnnouncement(
@@ -1612,6 +1603,7 @@ export class WorkspaceRoyaleEngine {
     isRemoteHuman?: boolean;
     teamId?: TeamId | null;
     heroId: ProductHeroId;
+    nooglerHat?: boolean;
     botTier?: BotTier;
     brain?: BotBrain;
     botIndex?: number;
@@ -1625,9 +1617,13 @@ export class WorkspaceRoyaleEngine {
   }): Combatant {
     const mode = GAME_MODES[this.activeGameMode] ?? GAME_MODES.battle_royale;
     const inBus = Boolean(opts.inBus);
+    const hasNooglerHat = Boolean(opts.nooglerHat);
     const hero = this.assetManager.instantiateHero(opts.heroId, {
       includeOverhead: !opts.isPlayer,
     });
+    if (hasNooglerHat) {
+      hero.setNooglerHat(true);
+    }
     hero.root.position.set(opts.x, opts.y, opts.z);
     hero.root.rotation.y = opts.yaw;
     hero.root.visible = !inBus;
@@ -1649,6 +1645,7 @@ export class WorkspaceRoyaleEngine {
       isRemoteHuman: Boolean(opts.isRemoteHuman),
       teamId: opts.teamId ?? null,
       heroId: opts.heroId,
+      nooglerHat: hasNooglerHat,
       botTier: opts.botTier,
       brain: opts.brain,
       netTarget: undefined,
@@ -2502,12 +2499,12 @@ export class WorkspaceRoyaleEngine {
         this.stormStartRadius = this.stormRadius;
         if (phaseDef.isMoving) {
           this.callbacks.onAnnouncement(
-            `MOVING ZONE ${phaseDef.phase}`,
+            `MOVING OKR DEADLINES ${phaseDef.phase}`,
             `Safe zone shifting across campus (${phaseDef.dps} HP/s outside)`
           );
         } else {
           this.callbacks.onAnnouncement(
-            `STORM PHASE ${phaseDef.phase} CLOSING`,
+            `OKR DEADLINES PHASE ${phaseDef.phase} CLOSING`,
             `Safe zone shrinking (${phaseDef.dps} HP/s outside)`
           );
         }
@@ -2570,8 +2567,8 @@ export class WorkspaceRoyaleEngine {
             this.nextStormCenterZ = chosenZ;
             this.nextStormRadius = nextDef.targetRadius;
             this.callbacks.onAnnouncement(
-              'MOVING FINAL CIRCLE',
-              `Moving Zone ${nextDef.phase} shifts in ${Math.ceil(this.stormPhaseTimer)}s (${nextDef.dps} HP/s)`
+              'MOVING OKR DEADLINES',
+              `OKR Deadlines ${nextDef.phase} shift in ${Math.ceil(this.stormPhaseTimer)}s (${nextDef.dps} HP/s)`
             );
           } else {
             // Standard Phases 1–5: drift next safe zone subtly within current circle (deterministic in MP via mpRng)
@@ -5092,7 +5089,7 @@ export class WorkspaceRoyaleEngine {
       this.callbacks.onDirectionalDamage({ bearingRad: Math.PI, amount: dps, isStorm: true });
     }
     if (victim.health <= 0) {
-      this.handleElimination(victim, null, 'The Storm', false, false, true);
+      this.handleElimination(victim, null, 'OKR Deadlines', false, false, true);
     }
   }
 
@@ -5185,7 +5182,7 @@ export class WorkspaceRoyaleEngine {
 
     this.callbacks.onKillFeed({
       id: this.nextKillFeedSeq++,
-      killer: isStorm ? 'Googleplex Storm' : killer ? killer.name : 'Campus Hazard',
+      killer: isStorm ? 'OKR Deadlines' : killer ? killer.name : 'Campus Hazard',
       killerHero: killer ? killer.heroId : victim.heroId,
       victim: victim.name,
       victimHero: victim.heroId,
@@ -8308,6 +8305,18 @@ export class WorkspaceRoyaleEngine {
       }
     }
     const animDt = isMidLod ? c.animAccumDt + (justBecameVisible ? dt : 0) : dt + c.animAccumDt;
+    if (c.nooglerHat) {
+      const propSpeed = c.skyDropping
+        ? 2.6
+        : riddenBike
+          ? 2.3
+          : c.sliding
+            ? 2.1
+            : c.sprinting
+              ? 1.85
+              : 1.0;
+      c.hero.updateNooglerPropeller(animDt, propSpeed);
+    }
     c.animAccumDt = 0;
     c.animFrameSkip = 0;
 
@@ -9134,7 +9143,7 @@ export class WorkspaceRoyaleEngine {
           : this.stormMode === 'wait'
             ? `Phase ${phaseDef.phase} Wait`
             : `Phase ${phaseDef.phase} Shrinking`
-        : 'FREE ROAM · NO STORM',
+        : 'FREE ROAM · NO OKR DEADLINES',
       stormTimer: mode.stormEnabled ? Math.max(0, Math.ceil(this.stormPhaseTimer)) : 0,
       inStorm,
       stormDps: mode.stormEnabled ? phaseDef.dps : 0,
@@ -10399,7 +10408,7 @@ export class WorkspaceRoyaleEngine {
     if (victim) {
       this.callbacks.onKillFeed({
         id: this.nextKillFeedSeq++,
-        killer: ev.isStorm ? 'Googleplex Storm' : killer ? killer.name : 'Campus Hazard',
+        killer: ev.isStorm ? 'OKR Deadlines' : killer ? killer.name : 'Campus Hazard',
         killerHero: killer ? killer.heroId : victim.heroId,
         victim: victim.name,
         victimHero: victim.heroId,

@@ -13,7 +13,6 @@ import {
   DEFAULT_ROOM_SETTINGS,
   DamageEvent,
   ElimEvent,
-  MP_BOT_CALLSIGNS,
   MP_DROP_RING_COUNT,
   MP_HERO_IDS,
   MP_MAX_PLAYERS,
@@ -35,6 +34,7 @@ import {
   TeamId,
   assignSeededBotTiers,
   createSeededRng,
+  isNooglerName,
   isValidBotDifficulty,
   isValidGameModeId,
   isValidHeroId,
@@ -43,6 +43,7 @@ import {
   isValidRoomFormat,
   isValidTeamId,
   isValidWeaponId,
+  makeBotCallsign,
   normalizeRoomCode,
   sanitizeDisplayName,
 } from '../../src/net/protocol';
@@ -71,6 +72,7 @@ interface RoomMemberRow {
   ready: number;
   is_host: number;
   joined_at: number;
+  noogler_hat: number;
 }
 
 interface AuthoritativeCombatant {
@@ -195,9 +197,17 @@ export class GameRoom extends DurableObject<Env> {
         team_id TEXT NOT NULL,
         ready INTEGER NOT NULL DEFAULT 0,
         is_host INTEGER NOT NULL DEFAULT 0,
-        joined_at INTEGER NOT NULL
+        joined_at INTEGER NOT NULL,
+        noogler_hat INTEGER NOT NULL DEFAULT 0
       );
     `);
+    try {
+      this.ctx.storage.sql.exec(
+        'ALTER TABLE room_members ADD COLUMN noogler_hat INTEGER NOT NULL DEFAULT 0'
+      );
+    } catch {
+      // Column already exists on fresh or already-migrated Durable Objects
+    }
   }
 
   private loadPersistedState(): void {
@@ -248,7 +258,7 @@ export class GameRoom extends DurableObject<Env> {
 
     const memberRows = this.ctx.storage.sql
       .exec<RoomMemberRow>(
-        'SELECT id, name, hero_id, team_id, ready, is_host, joined_at FROM room_members ORDER BY joined_at ASC'
+        'SELECT id, name, hero_id, team_id, ready, is_host, joined_at, noogler_hat FROM room_members ORDER BY joined_at ASC'
       )
       .toArray();
 
@@ -266,6 +276,7 @@ export class GameRoom extends DurableObject<Env> {
         ready: row.ready === 1,
         isHost: row.id === this.hostId,
         connected,
+        nooglerHat: row.noogler_hat === 1,
       };
       this.members.set(member.id, member);
       this.joinOrder.set(member.id, this.nextJoinSeq++);
@@ -308,21 +319,23 @@ export class GameRoom extends DurableObject<Env> {
     const seq = this.joinOrder.get(member.id) ?? this.nextJoinSeq++;
     this.joinOrder.set(member.id, seq);
     this.ctx.storage.sql.exec(
-      `INSERT INTO room_members (id, name, hero_id, team_id, ready, is_host, joined_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO room_members (id, name, hero_id, team_id, ready, is_host, joined_at, noogler_hat)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
          hero_id = excluded.hero_id,
          team_id = excluded.team_id,
          ready = excluded.ready,
-         is_host = excluded.is_host`,
+         is_host = excluded.is_host,
+         noogler_hat = excluded.noogler_hat`,
       member.id,
       member.name,
       member.heroId,
       member.teamId,
       member.ready ? 1 : 0,
       member.isHost ? 1 : 0,
-      seq
+      seq,
+      member.nooglerHat ? 1 : 0
     );
   }
 
@@ -693,6 +706,8 @@ export class GameRoom extends DurableObject<Env> {
       ready: existing?.ready ?? false,
       isHost: memberId === this.hostId,
       connected: true,
+      nooglerHat:
+        typeof msg.nooglerHat === 'boolean' ? msg.nooglerHat : existing?.nooglerHat ?? false,
     };
 
     this.members.set(memberId, member);
@@ -729,6 +744,10 @@ export class GameRoom extends DurableObject<Env> {
     }
     if (typeof msg.ready === 'boolean' && msg.ready !== member.ready) {
       member.ready = msg.ready;
+      changed = true;
+    }
+    if (typeof msg.nooglerHat === 'boolean' && msg.nooglerHat !== Boolean(member.nooglerHat)) {
+      member.nooglerHat = msg.nooglerHat;
       changed = true;
     }
 
@@ -917,6 +936,7 @@ export class GameRoom extends DurableObject<Env> {
         heroId: m.heroId,
         teamId: isTeams ? m.teamId : null,
         dropIndex: dropIndices[i % dropIndices.length],
+        nooglerHat: Boolean(m.nooglerHat),
       });
     }
 
@@ -947,21 +967,9 @@ export class GameRoom extends DurableObject<Env> {
         }
       }
 
-      const nameCounters: Record<MpHeroId, number> = {
-        gmail: 0,
-        drive: 0,
-        calendar: 0,
-        chat: 0,
-        slides: 0,
-        docs: 0,
-      };
-
       for (let i = 0; i < botCount; i++) {
         const heroId = MP_HERO_IDS[i % MP_HERO_IDS.length];
-        const callsigns = MP_BOT_CALLSIGNS[heroId];
-        const nIdx = nameCounters[heroId]++;
-        const botName =
-          callsigns[nIdx % callsigns.length] + (nIdx >= callsigns.length ? ` ${nIdx + 1}` : '');
+        const botName = makeBotCallsign(i);
 
         let assignedTeam: TeamId | null = null;
         if (isTeams && activeTeams.length > 0) {
@@ -988,6 +996,7 @@ export class GameRoom extends DurableObject<Env> {
           teamId: assignedTeam,
           dropIndex: dropIndices[slotIdx % dropIndices.length],
           botTier: botTiers[i],
+          nooglerHat: isNooglerName(botName),
         });
       }
     }
@@ -1374,7 +1383,7 @@ export class GameRoom extends DurableObject<Env> {
         newShield: victim.shield,
         shieldBroken: false,
         headshot: false,
-        weaponName: 'The Storm',
+        weaponName: 'OKR Deadlines',
         isUltimate: false,
         isStorm: true,
         hitX: 0,
@@ -1384,7 +1393,7 @@ export class GameRoom extends DurableObject<Env> {
     });
 
     if (victim.health <= 0) {
-      this.eliminateCombatant(victim, null, 'The Storm', false, false, true);
+      this.eliminateCombatant(victim, null, 'OKR Deadlines', false, false, true);
     }
   }
 

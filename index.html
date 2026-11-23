@@ -49,7 +49,7 @@
               <div id="splash-preload-fill" class="splash-preload-fill"></div>
             </div>
             <div class="splash-preload-meta">
-              <span id="splash-preload-caption" class="splash-preload-caption">Loading Mountain View Campus · 0/57</span>
+              <span id="splash-preload-caption" class="splash-preload-caption">Loading Mountain View Campus · 0/58</span>
               <span id="splash-preload-pct" class="splash-preload-pct">0%</span>
             </div>
           </div>
@@ -394,7 +394,7 @@
                     <span class="page-eyebrow">Mountain View Campus Rulesets</span>
                     <h2>Play Modes</h2>
                     <p class="page-subtitle">
-                      Choose how you drop into the 3× Googleplex — classic survival, fast-paced Blitz, sniper duels, or storm-free campus exploration.
+                      Choose how you drop into the 3× Googleplex — classic survival, fast-paced Blitz, sniper duels, or OKR-Deadline-free campus exploration.
                     </p>
                   </div>
                 </div>
@@ -449,6 +449,31 @@
                       <h3 id="detail-ult-name">Reply-All Barrage</h3>
                       <p id="detail-ult-desc"></p>
                     </div>
+
+                    <label class="hero-outfit-toggle" for="toggle-noogler-hat">
+                      <span class="hero-outfit-left">
+                        <span class="noogler-propeller-badge" aria-hidden="true">
+                          <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+                            <path d="M5 17a7 7 0 0 1 14 0H5z" fill="#4285F4" />
+                            <path d="M12 10a7 7 0 0 1 7 7h-7V10z" fill="#EA4335" />
+                            <path d="M8.5 10.9A7 7 0 0 1 12 10v7H8.5v-6.1z" fill="#FBBC04" />
+                            <path d="M12 10a7 7 0 0 1 3.5.9V17H12v-7z" fill="#34A853" />
+                            <rect x="4" y="16.5" width="16" height="2.2" rx="1.1" fill="#1A73E8" />
+                            <line x1="12" y1="6.5" x2="12" y2="10" stroke="#5F6368" stroke-width="1.8" stroke-linecap="round" />
+                            <ellipse cx="12" cy="6.2" rx="5.2" ry="1.5" fill="#FBBC04" stroke="#E37400" stroke-width="0.8" />
+                            <circle cx="12" cy="6.2" r="1.2" fill="#EA4335" />
+                          </svg>
+                        </span>
+                        <span class="hero-outfit-meta">
+                          <span class="hero-outfit-title">Noogler Propeller Hat</span>
+                          <span class="hero-outfit-sub">Outfit · 4-color Google beanie</span>
+                        </span>
+                      </span>
+                      <span class="toggle-switch">
+                        <input type="checkbox" id="toggle-noogler-hat" />
+                        <span class="toggle-slider"></span>
+                      </span>
+                    </label>
 
                     <div class="characters-actions">
                       <button type="button" id="btn-chars-back" class="btn-outlined btn-inline">← Back</button>
@@ -932,7 +957,18 @@
 
               <div class="mp-loadout-bar">
                 <div class="mp-loadout-section">
-                  <span class="mp-mini-label">Character</span>
+                  <div class="mp-loadout-head">
+                    <span class="mp-mini-label">Character</span>
+                    <button
+                      type="button"
+                      id="btn-mp-noogler-hat"
+                      class="mp-hat-toggle-pill"
+                      aria-pressed="false"
+                      title="Equip Noogler Propeller Hat"
+                    >
+                      🧢 Noogler Hat
+                    </button>
+                  </div>
                   <div id="mp-lobby-hero-picker" class="mp-hero-picker" role="group" aria-label="Select Character">
                     <button type="button" class="mp-hero-pill selected" data-hero="gmail">
                       <span class="mp-hero-dot" style="--hero-color: #EA4335"></span>
@@ -1124,7 +1160,7 @@
           <div class="storm-pill" id="storm-pill">
             <span class="storm-dot"></span>
             <span class="storm-phase-badge" id="storm-phase-badge">P1</span>
-            <span id="storm-status">Storm shrinking in 25s</span>
+            <span id="storm-status">OKR Deadlines closing in 25s</span>
           </div>
           <div class="perf-pill perf-good" id="perf-pill">
             <span class="perf-dot"></span>
@@ -1343,7 +1379,7 @@
               <span class="legend-item"><i class="lg-swatch lg-gbike"></i>GBike</span>
               <span class="legend-item"><i class="lg-swatch lg-drop"></i>Supply Drop</span>
               <span class="legend-item"><i class="lg-swatch lg-wp"></i>Waypoint</span>
-              <span class="legend-item"><i class="lg-swatch lg-storm"></i>Storm</span>
+              <span class="legend-item"><i class="lg-swatch lg-storm"></i>OKR Deadlines</span>
               <span class="legend-item hidden" id="legend-teammate"><i class="lg-swatch lg-teammate"></i>Teammate</span>
             </div>
           </div>
@@ -1365,12 +1401,17 @@
         </div>
       </div>
 
-      <!-- GAME OVER / VICTORY ROYALE SUMMARY OVERLAY -->
+      <!-- GAME OVER / GRAD REVIEW SUMMARY OVERLAY -->
       <div id="gameover-overlay" class="overlay hidden">
         <div class="modal-card gameover-card">
+          <div class="grad-review-eyebrow">GRAD REVIEW</div>
           <div class="placement-badge is-victory" id="go-placement">#1 / 20</div>
           <h2 id="go-title">Victory Royale!</h2>
           <p id="go-subtitle">You outlasted every rival at the Googleplex.</p>
+          <div id="go-grad-card" class="grad-card grad-oi" role="status" aria-live="polite">
+            <div id="go-grad-badge" class="grad-badge">Outstanding Impact (OI)</div>
+            <p id="go-grad-note" class="grad-note">Strong Q4 execution across the Googleplex. Exceeded every OKR.</p>
+          </div>
           <ul class="summary-stats-list" aria-label="Match statistics">
             <li class="sum-bullet-item">
               <span class="sum-bullet-left"><span class="sum-label">Play Mode</span></span>

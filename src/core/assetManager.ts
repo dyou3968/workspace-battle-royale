@@ -65,6 +65,10 @@ export interface HeroInstance {
   clearFlash: () => void;
   /** Lazily create or update a crisp compact overhead player nameplate billboard above HP/Shield bars */
   setNameplate: (name: string, teamColorCss?: string | null) => void;
+  /** Lazily attach/toggle the 3D Noogler Propeller Hat on top of the hero's head */
+  setNooglerHat: (enabled: boolean) => void;
+  /** Spin the Noogler Propeller Hat blades smoothly when equipped */
+  updateNooglerPropeller: (dt: number, speedMult?: number) => void;
 }
 
 export interface WeaponInstance {
@@ -393,6 +397,24 @@ export const HERO_ASSET_PATHS: Record<ProductHeroId, string> = {
   docs: '/assets/characters/hero_docs.glb',
 };
 
+export const OUTFIT_NOOGLER_HAT_PATH = '/assets/characters/outfit_noogler_hat.glb';
+
+/**
+ * Per-hero calibrated Noogler Propeller Hat offsets in `Head` bone-local space
+ * (Head bone rest origin is Y = 1.540m; hero icon top heights range from 1.745m to 1.796m).
+ */
+const NOOGLER_HAT_CALIBRATION: Record<
+  ProductHeroId,
+  { y: number; z: number; scale: number }
+> = {
+  gmail: { y: 0.190, z: 0.0, scale: 1.04 },
+  drive: { y: 0.142, z: 0.0, scale: 0.94 },
+  calendar: { y: 0.212, z: 0.0, scale: 1.04 },
+  chat: { y: 0.220, z: 0.0, scale: 1.02 },
+  slides: { y: 0.220, z: 0.0, scale: 1.02 },
+  docs: { y: 0.214, z: 0.0, scale: 1.02 },
+};
+
 export const WEAPON_ASSET_PATHS: Record<WeaponId, string> = {
   vanguard_m4: '/assets/weapons/weapon_vanguard_m4.glb',
   breaker_12g: '/assets/weapons/weapon_breaker_12g.glb',
@@ -561,6 +583,11 @@ export class AssetManager {
         label: `Hero · ${hero.displayName}`,
       });
     }
+    manifest.push({
+      cacheKey: 'outfit:noogler_hat',
+      url: OUTFIT_NOOGLER_HAT_PATH,
+      label: 'Outfit · Noogler Propeller Hat',
+    });
     for (const [id, url] of Object.entries(WEAPON_ASSET_PATHS)) {
       manifest.push({
         cacheKey: `weapon:${id}`,
@@ -919,6 +946,14 @@ export class AssetManager {
     let nameplateCanvas: HTMLCanvasElement | null = null;
     let nameplateTexture: THREE.CanvasTexture | null = null;
     let nameplateKey = '';
+
+    // Lazy 3D Noogler Propeller Hat mount (cloned only when setNooglerHat(true) is called)
+    const assetCache = this.cache;
+    let nooglerHatMount: THREE.Group | null = null;
+    let nooglerPropeller: THREE.Object3D | null = null;
+    let nooglerHatEnabled = false;
+    const hatAnchorParent = headNode ?? model;
+    const hatCalib = NOOGLER_HAT_CALIBRATION[heroId];
 
     // Glowing emerald Chat-reveal wallhack beacon ring (depthTest: false!)
     const revealMat = new THREE.MeshBasicMaterial({
@@ -1295,6 +1330,43 @@ export class AssetManager {
           overheadGroup.add(nameplateSprite);
         }
         nameplateSprite.visible = true;
+      },
+      setNooglerHat(enabled: boolean) {
+        nooglerHatEnabled = enabled;
+        if (enabled && !nooglerHatMount) {
+          const hatGltf = assetCache.get('outfit:noogler_hat');
+          if (!hatGltf) return;
+          const mount = new THREE.Group();
+          mount.name = 'NooglerHatMount';
+          const hatClone = hatGltf.scene.clone(true);
+          hatClone.traverse((obj) => {
+            if ((obj as THREE.Mesh).isMesh) {
+              const mesh = obj as THREE.Mesh;
+              mesh.castShadow = instance.castShadowEnabled;
+              mesh.receiveShadow = true;
+              shadowMeshes.push(mesh);
+            }
+          });
+          mount.add(hatClone);
+          if (headNode) {
+            mount.position.set(0, hatCalib.y, hatCalib.z);
+            mount.rotation.y = Math.PI;
+          } else {
+            mount.position.set(0, 1.54 + hatCalib.y, hatCalib.z);
+            mount.rotation.y = 0;
+          }
+          mount.scale.setScalar(hatCalib.scale);
+          hatAnchorParent.add(mount);
+          nooglerHatMount = mount;
+          nooglerPropeller = hatClone.getObjectByName('Noogler_Propeller') ?? null;
+        }
+        if (nooglerHatMount) {
+          nooglerHatMount.visible = enabled;
+        }
+      },
+      updateNooglerPropeller(dt: number, speedMult = 1) {
+        if (!nooglerHatEnabled || !nooglerPropeller) return;
+        nooglerPropeller.rotation.y += dt * (7.5 * speedMult);
       },
     };
 

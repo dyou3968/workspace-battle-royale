@@ -2011,10 +2011,10 @@ input:focus-visible {
 }
 
 .hero-info-panel {
-  padding: 16px 20px 18px;
+  padding: 12px 18px 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   background: var(--ws-surface);
   border-top: 1px solid var(--ws-border-subtle);
 }
@@ -2059,7 +2059,7 @@ input:focus-visible {
   background: var(--ws-blue-tonal);
   border: 1px solid var(--ws-blue-container);
   border-radius: 14px;
-  padding: 12px 14px;
+  padding: 9px 13px;
 }
 
 .ult-header {
@@ -2102,6 +2102,70 @@ input:focus-visible {
   font-size: 12.5px;
   line-height: 1.45;
   color: var(--ws-ink-secondary);
+}
+
+.hero-outfit-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 12px;
+  border-radius: 14px;
+  background: var(--ws-surface-low);
+  border: 1px solid var(--ws-border-subtle);
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease;
+  user-select: none;
+}
+
+.hero-outfit-toggle:hover {
+  background: var(--ws-blue-tonal);
+  border-color: var(--ws-border-strong);
+}
+
+.hero-outfit-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.noogler-propeller-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid var(--ws-border-subtle);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(60, 64, 67, 0.08);
+}
+
+.hero-outfit-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.hero-outfit-title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ws-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hero-outfit-sub {
+  font-size: 11.5px;
+  color: var(--ws-ink-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .characters-actions {
@@ -4636,9 +4700,112 @@ input:focus-visible {
 }
 
 .gameover-card {
-  width: min(470px, 94vw);
+  width: min(500px, 94vw);
   max-height: calc(100vh - 28px);
   overflow-y: auto;
+}
+
+.grad-review-eyebrow {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--g-blue);
+  margin-bottom: 8px;
+}
+
+.grad-card {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--ws-border-subtle);
+  background: var(--ws-surface-low);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.grad-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 14px;
+  border-radius: 9999px;
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.grad-note {
+  margin: 0 !important;
+  font-size: 12.5px !important;
+  line-height: 1.45;
+  color: var(--ws-ink-secondary);
+}
+
+/* GRAD Rating Tiers — Google Workspace M3 Palette */
+.grad-card.grad-ti {
+  background: linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%);
+  border-color: #fbbc04;
+}
+.grad-card.grad-ti .grad-badge {
+  background: #fbbc04;
+  color: #3d2800;
+}
+.grad-card.grad-ti .grad-note {
+  color: #5c3d00;
+}
+
+.grad-card.grad-oi {
+  background: linear-gradient(180deg, #f0f6ff 0%, #e8f0fe 100%);
+  border-color: #8ab4f8;
+}
+.grad-card.grad-oi .grad-badge {
+  background: #1a73e8;
+  color: #ffffff;
+}
+.grad-card.grad-oi .grad-note {
+  color: #174ea6;
+}
+
+.grad-card.grad-si {
+  background: linear-gradient(180deg, #eefbf3 0%, #e6f4ea 100%);
+  border-color: #81c995;
+}
+.grad-card.grad-si .grad-badge {
+  background: #1e8e3e;
+  color: #ffffff;
+}
+.grad-card.grad-si .grad-note {
+  color: #137333;
+}
+
+.grad-card.grad-mi {
+  background: linear-gradient(180deg, #fff8eb 0%, #fef7e0 100%);
+  border-color: #f9ab00;
+}
+.grad-card.grad-mi .grad-badge {
+  background: #e37400;
+  color: #ffffff;
+}
+.grad-card.grad-mi .grad-note {
+  color: #7c3f00;
+}
+
+.grad-card.grad-nei {
+  background: linear-gradient(180deg, #fef2f2 0%, #fce8e6 100%);
+  border-color: #f28b82;
+}
+.grad-card.grad-nei .grad-badge {
+  background: #d93025;
+  color: #ffffff;
+}
+.grad-card.grad-nei .grad-note {
+  color: #a50e0e;
 }
 
 .placement-badge {
@@ -4728,23 +4895,17 @@ input:focus-visible {
   gap: 10px;
 }
 
+.modal-actions-3 {
+  flex-wrap: wrap;
+}
+
 .modal-actions-3 button {
   width: auto;
+  min-width: 0;
   padding: 0 14px;
   font-size: 13.5px;
   white-space: nowrap;
-}
-
-.modal-actions-3 .btn-primary {
-  flex: 1.15;
-}
-
-.modal-actions-3 .btn-tonal {
-  flex: 1.35;
-}
-
-.modal-actions-3 .btn-outlined {
-  flex: 0.78;
+  flex: 1 1 136px;
 }
 
 @media (max-width: 560px) {
@@ -5968,6 +6129,52 @@ input:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.mp-loadout-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mp-hat-toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  background: var(--ws-surface-low);
+  border: 1.5px solid var(--ws-border);
+  color: var(--ws-ink-secondary);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mp-hat-toggle-pill:hover {
+  background: var(--ws-blue-tonal);
+  border-color: var(--ws-border-strong);
+  color: var(--ws-ink);
+}
+
+.mp-hat-toggle-pill.is-active {
+  background: linear-gradient(90deg, rgba(66, 133, 244, 0.14), rgba(234, 67, 53, 0.12), rgba(251, 188, 4, 0.16), rgba(52, 168, 83, 0.14));
+  border-color: var(--g-blue);
+  color: var(--ws-blue-ink);
+  box-shadow: 0 1px 3px rgba(26, 115, 232, 0.2);
+}
+
+.mp-roster-hat-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  line-height: 1;
+  margin-left: 4px;
 }
 
 .mp-mini-label {

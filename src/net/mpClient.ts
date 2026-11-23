@@ -46,6 +46,7 @@ export interface MpJoinProfile {
   name: string;
   heroId: MpHeroId;
   teamId?: TeamId;
+  nooglerHat?: boolean;
 }
 
 export type MpMessageListener = (msg: ServerMessage) => void;
@@ -285,6 +286,7 @@ export class MultiplayerClient {
         name: profile.name,
         heroId: profile.heroId,
         teamId: profile.teamId,
+        nooglerHat: Boolean(profile.nooglerHat),
       });
       this.startPingLoop();
     });

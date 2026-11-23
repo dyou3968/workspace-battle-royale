@@ -5,6 +5,7 @@ import {
   GameModeId,
   GameSettings,
   InventorySlot,
+  MatchSummary,
   ProductHeroDef,
   ProductHeroId,
   Rarity,
@@ -661,6 +662,7 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
   adsSensitivity: 1.0,
   invertY: false,
   visualSoundCompass: true,
+  nooglerHat: false,
 };
 
 export const GAME_MODES: Record<GameModeId, GameModeDef> = {
@@ -670,7 +672,7 @@ export const GAME_MODES: Record<GameModeId, GameModeDef> = {
     badge: 'CLASSIC 20',
     tagline: 'The signature Mountain View Googleplex survival showdown.',
     description:
-      'Drop unarmed from 135m across the full 3× Mountain View Googleplex, loot Tier 1–3 chests and 3 aerial Supply Drops, and outlast 19 AI opponents across 5 closing storm phases.',
+      'Drop unarmed from 135m across the full 3× Mountain View Googleplex, loot Tier 1–3 chests and 3 aerial Supply Drops, and outlast 19 AI opponents across 5 closing OKR Deadlines phases.',
     accentCss: '#4285f4',
     totalCombatants: 20,
     startMana: 40,
@@ -679,15 +681,15 @@ export const GAME_MODES: Record<GameModeId, GameModeDef> = {
     stormEnabled: true,
     stormPaceMult: 1.0,
     initialStormRadius: 365,
-    highlights: ['20 Characters', 'Standard 5-Phase Storm', 'Tier 1–3 Loot Chests', '3 Supply Drops'],
+    highlights: ['20 Characters', '5-Phase OKR Deadlines', 'Tier 1–3 Loot Chests', '3 Supply Drops'],
   },
   blitz: {
     id: 'blitz',
     name: 'Blitz Royale',
     badge: 'FAST PACED',
-    tagline: 'Turbocharged storm cycles, upgraded loot chests, and hyper Mana regen.',
+    tagline: 'Turbocharged OKR Deadlines, upgraded loot chests, and hyper Mana regen.',
     description:
-      'High-tempo survival inside a tighter starting perimeter with 1.8× faster storm collapses, boosted ground movement (+12%), upgraded Tier 2–3 chests everywhere, and supercharged Mana for relentless Ultimates.',
+      'High-tempo survival inside a tighter starting perimeter with 1.8× faster OKR Deadlines collapses, boosted ground movement (+12%), upgraded Tier 2–3 chests everywhere, and supercharged Mana for relentless Ultimates.',
     accentCss: '#f97316',
     totalCombatants: 16,
     startMana: 60,
@@ -697,7 +699,7 @@ export const GAME_MODES: Record<GameModeId, GameModeDef> = {
     stormPaceMult: 0.55,
     initialStormRadius: 270,
     minChestTier: 2,
-    highlights: ['16 Characters', '1.8× Faster Storm', 'Tier 2–3 Upgraded Chests', '+65% Mana Regen'],
+    highlights: ['16 Characters', 'Turbo OKR Deadlines', 'Tier 2–3 Upgraded Chests', '+65% Mana Regen'],
   },
   sniper_showdown: {
     id: 'sniper_showdown',
@@ -720,10 +722,10 @@ export const GAME_MODES: Record<GameModeId, GameModeDef> = {
   campus_practice: {
     id: 'campus_practice',
     name: 'Campus Free Roam',
-    badge: 'NO STORM',
-    tagline: 'Explore the 3× Mountain View Googleplex with no storm pressure and light sparring bots.',
+    badge: 'NO DEADLINES',
+    tagline: 'Explore the 3× Mountain View Googleplex with no OKR Deadlines pressure and light sparring bots.',
     description:
-      'Tour every Mountain View landmark, rooftop, and office floor with zero storm pressure, full 100 starting Mana, 2.2× Mana regen, upgraded Tier 2–3 loot chests, and 6 Intern sparring bots.',
+      'Tour every Mountain View landmark, rooftop, and office floor with zero OKR Deadlines pressure, full 100 starting Mana, 2.2× Mana regen, upgraded Tier 2–3 loot chests, and 6 Intern sparring bots.',
     accentCss: '#34a853',
     totalCombatants: 7,
     startMana: 100,
@@ -734,7 +736,7 @@ export const GAME_MODES: Record<GameModeId, GameModeDef> = {
     initialStormRadius: 420,
     minChestTier: 2,
     forceBotDifficulty: 'casual',
-    highlights: ['No Storm Closing', '6 Intern Sparring Bots', '100 Start Mana · 2.2× Regen', 'All 5 Skinned Weapons'],
+    highlights: ['No OKR Deadlines', '6 Intern Sparring Bots', '100 Start Mana · 2.2× Regen', 'All 5 Skinned Weapons'],
   },
 };
 
@@ -1038,4 +1040,88 @@ export function rollRandomLoot(highTier = false, modeId: GameModeId = 'battle_ro
   else if (itemRoll < 0.94) id = 'hardlight_cover';
   else id = 'impulse_booster';
   return { kind: 'item', id, rarity };
+}
+
+// ---------------------------------------------------------------------------
+// Google-Culture Kill Feed Verbs & GRAD Performance Review
+// ---------------------------------------------------------------------------
+
+export const GOOGLE_ELIM_VERBS: readonly string[] = [
+  'deprecated',
+  'marked "Won\'t Fix"',
+  'descoped',
+  'reorg\'d',
+  'archived',
+  'flagged P0 on',
+  'sent a Fri 4:59 PM sync to',
+  'closed the Launch Review of',
+  'pushed to Q3',
+];
+
+export const OKR_ELIM_VERBS: readonly string[] = [
+  'missed OKR Deadlines',
+  'was descoped by OKR Deadlines',
+  'slipped past OKR Deadlines',
+];
+
+export function pickElimVerb(seed: number, isStorm = false): string {
+  const list = isStorm ? OKR_ELIM_VERBS : GOOGLE_ELIM_VERBS;
+  const idx = Math.abs(Math.floor(seed)) % list.length;
+  return list[idx];
+}
+
+export interface GradRatingDef {
+  rating: string;
+  shortCode: 'TI' | 'OI' | 'SI' | 'MI' | 'NEI';
+  tier: 'ti' | 'oi' | 'si' | 'mi' | 'nei';
+  managerNote: string;
+}
+
+export function computeGradReview(summary: MatchSummary): GradRatingDef {
+  const total = Math.max(1, summary.totalPlayers || 20);
+  const top25Cutoff = Math.max(1, Math.ceil(total * 0.25));
+  const midPackCutoff = Math.max(2, Math.ceil(total * 0.6));
+
+  if ((summary.won && summary.eliminations >= 4) || (summary.placement <= 2 && summary.eliminations >= 7)) {
+    return {
+      rating: 'Transformative Impact (TI)',
+      shortCode: 'TI',
+      tier: 'ti',
+      managerNote: 'Promo committee unanimously approved. Free microkitchen snacks for life.',
+    };
+  }
+
+  if (summary.won || (summary.placement <= 3 && summary.eliminations >= 3)) {
+    return {
+      rating: 'Outstanding Impact (OI)',
+      shortCode: 'OI',
+      tier: 'oi',
+      managerNote: 'Strong Q4 execution across the Googleplex. Exceeded every OKR.',
+    };
+  }
+
+  if (summary.placement <= top25Cutoff || summary.eliminations >= 2 || summary.damageDealt >= 350) {
+    return {
+      rating: 'Significant Impact (SI)',
+      shortCode: 'SI',
+      tier: 'si',
+      managerNote: 'Solid cross-functional impact — high-visibility work across campus.',
+    };
+  }
+
+  if (summary.placement <= midPackCutoff || summary.eliminations >= 1 || summary.survivedSeconds >= 60) {
+    return {
+      rating: 'Moderate Impact (MI)',
+      shortCode: 'MI',
+      tier: 'mi',
+      managerNote: 'Solid cross-functional effort — let\'s circle back and tighten scope next match.',
+    };
+  }
+
+  return {
+    rating: 'Not Enough Impact (NEI)',
+    shortCode: 'NEI',
+    tier: 'nei',
+    managerNote: 'Forgot your badge at B43. Let\'s schedule a 1:1 to realign on OKRs.',
+  };
 }

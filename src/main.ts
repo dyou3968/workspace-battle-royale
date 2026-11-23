@@ -10,6 +10,7 @@ import {
 } from './core/assetManager';
 import { BOT_DIFFICULTY_OPTIONS, BOT_PROFILES } from './data/botProfiles';
 import {
+  computeGradReview,
   DEFAULT_GAME_SETTINGS,
   GAME_CONSTANTS,
   GAME_MODES,
@@ -17,6 +18,7 @@ import {
   getUtilityChannelTime,
   getWeaponMagSize,
   HERO_MAP,
+  pickElimVerb,
   PRODUCT_HEROES,
   RARITY_CONFIG,
   UTILITY_ITEMS,
@@ -194,6 +196,11 @@ const homeHeroMeta = document.getElementById('home-hero-meta')!;
 const homeStripHeroName = document.getElementById('home-strip-hero-name')!;
 const homeStripUltName = document.getElementById('home-strip-ult-name')!;
 const btnHomeCustomize = document.getElementById('btn-home-customize') as HTMLButtonElement;
+const toggleNooglerHat = document.getElementById('toggle-noogler-hat') as HTMLInputElement | null;
+const btnMpNooglerHat = document.getElementById('btn-mp-noogler-hat') as HTMLButtonElement | null;
+const goGradCard = document.getElementById('go-grad-card');
+const goGradBadge = document.getElementById('go-grad-badge');
+const goGradNote = document.getElementById('go-grad-note');
 
 // Page 2: Play Modes DOM
 const modesBody = document.getElementById('modes-body')!;
@@ -406,6 +413,10 @@ function loadSettings(): GameSettings {
         typeof parsed.visualSoundCompass === 'boolean'
           ? parsed.visualSoundCompass
           : (DEFAULT_GAME_SETTINGS.visualSoundCompass ?? true),
+      nooglerHat:
+        typeof parsed.nooglerHat === 'boolean'
+          ? parsed.nooglerHat
+          : (DEFAULT_GAME_SETTINGS.nooglerHat ?? false),
     };
   } catch {
     return { ...DEFAULT_GAME_SETTINGS };
@@ -596,6 +607,7 @@ class LobbyHeroShowcase {
   private currentHero: HeroInstance | null = null;
   private currentWeapon: WeaponInstance | null = null;
   private currentHeroId: ProductHeroId | null = null;
+  private nooglerHatEnabled = false;
   private assets: AssetManager;
 
   // Blender exported heroes face -Z; yaw = Math.PI faces +Z (straight at camera)
@@ -798,6 +810,9 @@ class LobbyHeroShowcase {
     this.clearCurrentHero();
 
     const inst = this.assets.instantiateHero(heroId, { includeOverhead: false });
+    if (this.nooglerHatEnabled) {
+      inst.setNooglerHat(true);
+    }
     let showcaseWeapon: WeaponInstance | null = null;
     if (weaponId) {
       showcaseWeapon = this.assets.instantiateWeapon(weaponId, 'common');
@@ -830,6 +845,13 @@ class LobbyHeroShowcase {
     this.updateFlipButtonLabel();
   }
 
+  public setNooglerHat(enabled: boolean): void {
+    this.nooglerHatEnabled = enabled;
+    if (this.currentHero) {
+      this.currentHero.setNooglerHat(enabled);
+    }
+  }
+
   public flipFrontBack(): void {
     const norm = ((this.yaw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
     const showingFront = Math.abs(norm - Math.PI) < Math.PI * 0.5;
@@ -857,6 +879,9 @@ class LobbyHeroShowcase {
 
       if (this.currentHero) {
         this.currentHero.mixer.update(dt);
+        if (this.nooglerHatEnabled) {
+          this.currentHero.updateNooglerPropeller(dt, 1.15);
+        }
       }
 
       if (this.targetSnapYaw !== null) {
@@ -1484,11 +1509,12 @@ function pushKillFeed(entry: KillFeedEntry): void {
   if (entry.headshot) badges.push('<span class="kill-hs-tag">HEADSHOT</span>');
   if (entry.isUltimate) badges.push('<span class="kill-ult-tag">ULT</span>');
 
+  const elimVerb = pickElimVerb(entry.id, Boolean(entry.isStorm));
   if (entry.isStorm) {
-    el.innerHTML = `<span>${escapeHtml(entry.victim)} eliminated by <b>Storm</b></span>`;
+    el.innerHTML = `<span><b>${escapeHtml(entry.victim)}</b> ${escapeHtml(elimVerb)}</span>`;
   } else {
     el.innerHTML = `
-      <span><b>${escapeHtml(entry.killer)}</b> [${escapeHtml(entry.weapon)}] <b>${escapeHtml(entry.victim)}</b></span>
+      <span><b>${escapeHtml(entry.killer)}</b> ${escapeHtml(elimVerb)} <b>${escapeHtml(entry.victim)}</b> [${escapeHtml(entry.weapon)}]</span>
       ${badges.join('')}
     `;
   }
@@ -1842,11 +1868,11 @@ function renderHud(state: HudSnapshot): void {
     stormPill.classList.add('no-storm');
     stormPhaseBadge.classList.remove('is-moving');
     setTextCached(stormPhaseBadge, 'SAFE');
-    setTextCached(stormStatus, 'FREE ROAM · NO STORM');
+    setTextCached(stormStatus, 'FREE ROAM · NO OKR DEADLINES');
     if (isFullMapOpen) {
       setTextCached(fullmapZoneEl, state.zoneName);
       fullmapStormEl.classList.add('no-storm');
-      setTextCached(fullmapStormEl, 'Free Roam · No Storm');
+      setTextCached(fullmapStormEl, 'Free Roam · No OKR Deadlines');
     }
   } else {
     stormPill.classList.remove('no-storm');
@@ -1860,12 +1886,14 @@ function renderHud(state: HudSnapshot): void {
     const stormAction =
       cleanStormLabel.toLowerCase() === 'wait'
         ? isMoving
-          ? `Moving in ${timerStr}`
-          : `Shrinking in ${timerStr}`
-        : `${cleanStormLabel} · ${timerStr}`;
+          ? `OKR Deadlines moving in ${timerStr}`
+          : `OKR Deadlines closing in ${timerStr}`
+        : isMoving
+          ? `OKR Deadlines moving! · ${timerStr}`
+          : `OKR Deadlines closing · ${timerStr}`;
     setTextCached(
       stormStatus,
-      state.inStorm ? `IN STORM (-${state.stormDps} HP/s) · ${stormAction}` : stormAction
+      state.inStorm ? `OUTSIDE OKR DEADLINES (-${state.stormDps} HP/s) · ${stormAction}` : stormAction
     );
     stormPill.classList.toggle('in-storm', state.inStorm);
 
@@ -2208,6 +2236,13 @@ const hudCallbacks: Omit<HudCallbacks, 'onHitMarker'> & {
         : `Finished #${summary.placement} of ${summary.totalPlayers} in ${mode.name}.`;
     }
 
+    const grad = computeGradReview(summary);
+    if (goGradCard && goGradBadge && goGradNote) {
+      goGradCard.className = `grad-card grad-${grad.tier}`;
+      goGradBadge.textContent = grad.rating;
+      goGradNote.textContent = grad.managerNote;
+    }
+
     document.getElementById('go-hero')!.textContent = summary.heroPersona;
     document.getElementById('go-elims')!.textContent = String(summary.eliminations);
     document.getElementById('go-headshots')!.textContent = String(summary.headshots);
@@ -2435,7 +2470,10 @@ function renderMpLobby(): void {
   const rosterSig =
     `${room.settings.format}|${room.hostId}|${mpSelfId ?? ''}|` +
     room.members
-      .map((m) => `${m.id}:${m.name}:${m.heroId}:${m.teamId}:${m.ready ? 1 : 0}:${m.isHost ? 1 : 0}:${m.connected ? 1 : 0}`)
+      .map(
+        (m) =>
+          `${m.id}:${m.name}:${m.heroId}:${m.teamId}:${m.ready ? 1 : 0}:${m.isHost ? 1 : 0}:${m.connected ? 1 : 0}:${m.nooglerHat ? 1 : 0}`
+      )
       .join('|');
   if (rosterSig !== mpLastRosterSig) {
     mpLastRosterSig = rosterSig;
@@ -2448,6 +2486,9 @@ function renderMpLobby(): void {
           const isSelf = m.id === mpSelfId;
           const rowCls = `mp-roster-row${isSelf ? ' is-self' : ''}${m.connected ? '' : ' is-disconnected'}`;
           const hostBadge = m.isHost ? '<span class="mp-host-badge">Host</span>' : '';
+          const hatBadge = m.nooglerHat
+            ? '<span class="mp-roster-hat-badge" title="Noogler Propeller Hat">🧢</span>'
+            : '';
           const teamPill = isTeams
             ? `<span class="mp-team-pill team-${m.teamId}" data-team="${m.teamId}">${escapeHtml(TEAM_CONFIG[m.teamId].label)}</span>`
             : '';
@@ -2456,7 +2497,7 @@ function renderMpLobby(): void {
             <div class="${rowCls}" role="listitem">
               <div class="mp-roster-avatar" style="--hero-color: ${h.primaryColor}">${HERO_PRODUCT_SVGS[h.id]}</div>
               <div class="mp-roster-info">
-                <div class="mp-roster-name">${escapeHtml(m.name)}${isSelf ? ' (You)' : ''}</div>
+                <div class="mp-roster-name">${escapeHtml(m.name)}${isSelf ? ' (You)' : ''}${hatBadge}</div>
                 <div class="mp-roster-hero">${escapeHtml(h.personaName)}</div>
               </div>
               <div class="mp-roster-badges">
@@ -2471,12 +2512,21 @@ function renderMpLobby(): void {
     }
   }
 
-  // Sync personal Hero picker pills
+  // Sync personal Hero picker pills & Noogler Hat pill
   const activeHero = selfMember?.heroId ?? selectedHeroId;
   mpLobbyHeroPicker.querySelectorAll<HTMLButtonElement>('.mp-hero-pill').forEach((btn) => {
     btn.classList.toggle('selected', btn.dataset.hero === activeHero);
     btn.disabled = isCountdown;
   });
+  if (btnMpNooglerHat) {
+    const hasHat =
+      typeof selfMember?.nooglerHat === 'boolean'
+        ? selfMember.nooglerHat
+        : Boolean(currentSettings.nooglerHat);
+    btnMpNooglerHat.classList.toggle('is-active', hasHat);
+    btnMpNooglerHat.setAttribute('aria-pressed', hasHat ? 'true' : 'false');
+    btnMpNooglerHat.disabled = isCountdown;
+  }
 
   // Sync Team picker visibility & selection (Teams format only)
   mpTeamPickerWrap.classList.toggle('hidden', !isTeams);
@@ -2785,7 +2835,11 @@ async function handleCreatePrivateRoom(): Promise<void> {
   try {
     const code = await mpClient.createRoom(serverUrl);
     setMpJoinStatus(`Joining room ${code}...`, 'info');
-    const started = mpClient.connect(code, { name, heroId: selectedHeroId }, serverUrl);
+    const started = mpClient.connect(
+      code,
+      { name, heroId: selectedHeroId, nooglerHat: Boolean(currentSettings.nooglerHat) },
+      serverUrl
+    );
     if (!started) {
       setMpJoinBusy(false);
       setMpJoinStatus(mpClient.errorMessage ?? 'Unable to connect to room.', 'error');
@@ -2820,12 +2874,45 @@ function handleJoinPrivateRoom(): void {
 
   setMpJoinBusy(true);
   setMpJoinStatus(`Connecting to room ${code}...`, 'info');
-  const started = mpClient.connect(code, { name, heroId: selectedHeroId }, serverUrl);
+  const started = mpClient.connect(
+    code,
+    { name, heroId: selectedHeroId, nooglerHat: Boolean(currentSettings.nooglerHat) },
+    serverUrl
+  );
   if (!started) {
     setMpJoinBusy(false);
     setMpJoinStatus(mpClient.errorMessage ?? 'Unable to connect to room.', 'error');
   }
 }
+
+function syncNooglerHatUi(): void {
+  const enabled = Boolean(currentSettings.nooglerHat);
+  if (toggleNooglerHat) {
+    toggleNooglerHat.checked = enabled;
+  }
+  if (btnMpNooglerHat) {
+    btnMpNooglerHat.classList.toggle('is-active', enabled);
+    btnMpNooglerHat.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+  }
+  showcase.setNooglerHat(enabled);
+}
+
+function setNooglerHatEnabled(enabled: boolean, syncServer = true): void {
+  currentSettings.nooglerHat = enabled;
+  saveSettings(currentSettings);
+  syncNooglerHatUi();
+  if (syncServer && mpClient.isConnected) {
+    mpClient.send({ type: 'update_profile', nooglerHat: enabled });
+  }
+}
+
+toggleNooglerHat?.addEventListener('change', () => {
+  setNooglerHatEnabled(Boolean(toggleNooglerHat.checked), true);
+});
+
+btnMpNooglerHat?.addEventListener('click', () => {
+  setNooglerHatEnabled(!Boolean(currentSettings.nooglerHat), true);
+});
 
 // ==================== BOOTSTRAP MENU, SETTINGS & ASSET PRELOAD ====================
 bindSplashSceneBarElements();
@@ -2835,6 +2922,7 @@ bindSettingsControls();
 setActiveSettingsTab('gameplay');
 engine.applySettings(currentSettings);
 syncSettingsUi();
+syncNooglerHatUi();
 syncPerfHudVisibility();
 updateHeroDetails();
 navigateMenu('home');
@@ -2922,7 +3010,7 @@ const preloadPromise: Promise<void> = engine
     assetPreloadBar.classList.add('ready');
     preloadPct.textContent = '100%';
     preloadFill.style.width = '100%';
-    const totalCount = lastPreloadTotal || 57;
+    const totalCount = lastPreloadTotal || 58;
     preloadLabel.textContent = `All ${totalCount} 3D Mountain View campus assets loaded`;
     assetStatusChip.classList.add('ready');
     assetChipText.textContent = `Ready · ${totalCount} assets`;
@@ -3011,7 +3099,12 @@ function launchMatch(): void {
   currentMatchPhase = 'skydrop';
   syncPerfHudVisibility();
   engine.applySettings(currentSettings);
-  engine.startMatch(selectedHeroId, currentSettings.botDifficulty, selectedModeId);
+  engine.startMatch(
+    selectedHeroId,
+    currentSettings.botDifficulty,
+    selectedModeId,
+    Boolean(currentSettings.nooglerHat)
+  );
 }
 
 function returnToLobby(targetPage: MenuPage = 'home'): void {
