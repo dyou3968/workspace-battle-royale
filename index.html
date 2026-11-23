@@ -349,10 +349,20 @@
                     </button>
                   </div>
 
-                  <!-- Bottom-Anchored Primary Play CTA + Subtle Utility Links (Zero inline settings) -->
+                  <!-- Bottom-Anchored Primary Play CTA + Multiplayer Entry + Utility Links -->
                   <div class="home-play-dock">
                     <button type="button" id="btn-home-play" class="btn-primary btn-play-hero" disabled>
                       Loading 3D assets (0%)...
+                    </button>
+
+                    <button type="button" id="btn-home-multiplayer" class="btn-tonal btn-play-multiplayer">
+                      <svg class="btn-mp-icon" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="7.4" cy="6.6" r="2.7" />
+                        <path d="M2.4 15.8c.7-2.5 2.4-3.8 5-3.8s4.3 1.3 5 3.8" />
+                        <circle cx="13.9" cy="7.4" r="2.2" />
+                        <path d="M13.6 12.1c1.9.2 3.2 1.3 3.9 3.4" />
+                      </svg>
+                      <span>Play with Friends</span>
                     </button>
 
                     <div class="home-utility-links">
@@ -816,6 +826,225 @@
         </div>
       </div>
 
+      <!-- PRIVATE ROOM CREATE / JOIN MODAL (GOOGLE WORKSPACE M3) -->
+      <div id="mp-join-overlay" class="overlay mp-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="mp-join-title">
+        <div class="modal-card mp-join-card">
+          <div class="mp-header-badge">PRIVATE ROOM</div>
+          <h2 id="mp-join-title">Play with Friends</h2>
+          <p class="mp-join-subtitle">
+            Create a private Googleplex lobby or join with a friend's room code.
+          </p>
+
+          <div class="mp-field-group">
+            <label class="mp-field-label" for="mp-name-input">Display Name</label>
+            <input
+              id="mp-name-input"
+              class="mp-text-input"
+              type="text"
+              maxlength="18"
+              autocomplete="nickname"
+              spellcheck="false"
+              placeholder="Your display name"
+            />
+          </div>
+
+          <div class="mp-join-hero-pill">
+            <div class="mp-join-hero-meta">
+              <span class="mp-join-hero-kicker">Character</span>
+              <span id="mp-join-hero-label" class="mp-join-hero-label">Gmail AI</span>
+            </div>
+            <button type="button" id="btn-mp-join-change-hero" class="btn-outlined btn-sm mp-btn-change-hero">
+              Change
+            </button>
+          </div>
+
+          <button type="button" id="btn-mp-create-room" class="btn-primary mp-btn-create">
+            Create Private Room
+          </button>
+
+          <div class="mp-divider" aria-hidden="true">
+            <span>or join an existing room</span>
+          </div>
+
+          <div class="mp-join-code-row">
+            <input
+              id="mp-code-input"
+              class="mp-code-input"
+              type="text"
+              maxlength="6"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="ROOM CODE"
+              aria-label="Room Code"
+            />
+            <button type="button" id="btn-mp-join-room" class="btn-tonal mp-btn-join">Join</button>
+          </div>
+
+          <div id="mp-join-status" class="mp-status-text hidden" role="status" aria-live="polite"></div>
+
+          <div class="mp-join-footer">
+            <button type="button" id="btn-mp-join-close" class="btn-outlined mp-btn-close">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PRE-MATCH PRIVATE WAITING ROOM OVERLAY (GOOGLE WORKSPACE M3) -->
+      <div id="mp-lobby-overlay" class="overlay mp-overlay hidden" role="dialog" aria-modal="true" aria-label="Multiplayer Waiting Room">
+        <div class="mp-lobby-card">
+          <!-- Top Header Bar -->
+          <header class="mp-lobby-header">
+            <div class="mp-lobby-header-left">
+              <div class="mp-room-code-pill">
+                <span class="mp-room-code-kicker">ROOM</span>
+                <span id="mp-lobby-code" class="mp-room-code-val">MV42</span>
+              </div>
+              <button type="button" id="btn-mp-copy-link" class="btn-tonal btn-sm mp-copy-btn">
+                <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M8.4 11.6a3.5 3.5 0 0 0 5 .2l2.2-2.2a3.5 3.5 0 0 0-5-5L9.4 5.8" />
+                  <path d="M11.6 8.4a3.5 3.5 0 0 0-5-.2L4.4 10.4a3.5 3.5 0 0 0 5 5l1.2-1.2" />
+                </svg>
+                <span>Copy Invite Link</span>
+              </button>
+            </div>
+
+            <div class="mp-lobby-header-right">
+              <span id="mp-lobby-conn" class="mp-conn-badge" aria-live="polite">Connected · 18ms</span>
+              <button type="button" id="btn-mp-leave-room" class="btn-outlined btn-sm btn-danger-outline mp-leave-btn">
+                Leave Room
+              </button>
+            </div>
+          </header>
+
+          <!-- 2-Column Waiting Room Grid -->
+          <div class="mp-lobby-grid">
+            <!-- Left Column: Live Squad / Player Roster + Loadout Bar -->
+            <div class="mp-roster-col">
+              <div class="mp-section-head">
+                <h3 class="mp-section-title">Players</h3>
+                <span id="mp-lobby-player-count" class="mp-count-pill">1 / 20</span>
+              </div>
+
+              <div id="mp-roster-list" class="mp-roster-list" role="list" aria-label="Room Players"></div>
+
+              <div class="mp-loadout-bar">
+                <div class="mp-loadout-section">
+                  <span class="mp-mini-label">Character</span>
+                  <div id="mp-lobby-hero-picker" class="mp-hero-picker" role="group" aria-label="Select Character">
+                    <button type="button" class="mp-hero-pill selected" data-hero="gmail">
+                      <span class="mp-hero-dot" style="--hero-color: #EA4335"></span>
+                      <span>Gmail</span>
+                    </button>
+                    <button type="button" class="mp-hero-pill" data-hero="drive">
+                      <span class="mp-hero-dot" style="--hero-color: #34A853"></span>
+                      <span>Drive</span>
+                    </button>
+                    <button type="button" class="mp-hero-pill" data-hero="calendar">
+                      <span class="mp-hero-dot" style="--hero-color: #4285F4"></span>
+                      <span>Calendar</span>
+                    </button>
+                    <button type="button" class="mp-hero-pill" data-hero="chat">
+                      <span class="mp-hero-dot" style="--hero-color: #00AC47"></span>
+                      <span>Chat</span>
+                    </button>
+                    <button type="button" class="mp-hero-pill" data-hero="slides">
+                      <span class="mp-hero-dot" style="--hero-color: #FBBC04"></span>
+                      <span>Slides</span>
+                    </button>
+                    <button type="button" class="mp-hero-pill" data-hero="docs">
+                      <span class="mp-hero-dot" style="--hero-color: #2563EB"></span>
+                      <span>Docs</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div id="mp-team-picker-wrap" class="mp-team-picker-wrap hidden">
+                  <span class="mp-mini-label">Team</span>
+                  <div class="mp-team-picker" role="group" aria-label="Select Team">
+                    <button type="button" class="mp-team-btn selected" data-team="blue">
+                      <span class="mp-team-dot"></span>
+                      <span>Blue</span>
+                    </button>
+                    <button type="button" class="mp-team-btn" data-team="red">
+                      <span class="mp-team-dot"></span>
+                      <span>Red</span>
+                    </button>
+                    <button type="button" class="mp-team-btn" data-team="yellow">
+                      <span class="mp-team-dot"></span>
+                      <span>Yellow</span>
+                    </button>
+                    <button type="button" class="mp-team-btn" data-team="green">
+                      <span class="mp-team-dot"></span>
+                      <span>Green</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Column: Match Settings (Host Editable / Guests Read-Only) -->
+            <div class="mp-settings-col" id="mp-lobby-settings">
+              <div class="mp-section-head">
+                <h3 class="mp-section-title">Match Settings</h3>
+                <span id="mp-settings-role-badge" class="mp-role-pill">Host Controls</span>
+              </div>
+
+              <div class="mp-settings-body">
+                <div class="mp-setting-group">
+                  <span class="mp-setting-label">Format</span>
+                  <div id="mp-format-group" class="mp-segmented mp-segmented-2" role="group" aria-label="Match Format">
+                    <button type="button" class="mp-seg-btn selected" data-format="ffa">Free-For-All</button>
+                    <button type="button" class="mp-seg-btn" data-format="teams">Teams</button>
+                  </div>
+                </div>
+
+                <div class="mp-setting-group">
+                  <span class="mp-setting-label">Play Mode</span>
+                  <div id="mp-mode-group" class="mp-segmented mp-segmented-3" role="group" aria-label="Play Mode">
+                    <button type="button" class="mp-seg-btn selected" data-mode="battle_royale">Battle Royale</button>
+                    <button type="button" class="mp-seg-btn" data-mode="blitz">Blitz Royale</button>
+                    <button type="button" class="mp-seg-btn" data-mode="sniper_showdown">Sniper Showdown</button>
+                  </div>
+                </div>
+
+                <div class="mp-setting-group mp-toggle-card">
+                  <label class="setting-toggle-row mp-toggle-row" for="mp-fill-bots-toggle">
+                    <span class="setting-toggle-meta">
+                      <span class="mp-toggle-title">Fill to 20 with AI Bots</span>
+                      <span class="mp-toggle-sub">Uncheck for Humans Only PvP</span>
+                    </span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="mp-fill-bots-toggle" checked />
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+                </div>
+
+                <div id="mp-diff-block" class="mp-setting-group">
+                  <span class="mp-setting-label">Bot Difficulty</span>
+                  <div id="mp-diff-group" class="mp-segmented mp-segmented-3" role="group" aria-label="Bot Difficulty">
+                    <button type="button" class="mp-seg-btn" data-diff="casual">Intern</button>
+                    <button type="button" class="mp-seg-btn selected" data-diff="tactical">Staff</button>
+                    <button type="button" class="mp-seg-btn" data-diff="pro">Principal</button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="mp-countdown-banner" class="mp-countdown-banner hidden" role="status" aria-live="assertive">
+                DROPPING IN 3...
+              </div>
+
+              <div class="mp-lobby-footer">
+                <button type="button" id="btn-mp-ready" class="btn-tonal mp-btn-ready">Ready Up</button>
+                <button type="button" id="btn-mp-start-match" class="btn-primary mp-btn-start">Drop In!</button>
+                <div id="mp-waiting-host-note" class="mp-waiting-host-note hidden">
+                  Waiting for host to launch...
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- IN-GAME TACTICAL HUD -->
       <div id="hud" class="hidden">
         <!-- Longbow .308 Magnified Sniper Scope Overlay -->
@@ -898,6 +1127,7 @@
             <span class="perf-sep">·</span>
             <span id="perf-draws">0 draws</span>
           </div>
+          <div class="hud-mp-pill hidden" id="hud-mp-pill">ROOM MV42 · 24ms</div>
         </div>
 
         <!-- TOP CENTER: Compass Bearing Strip, Match Stats, Sky-Drop Prompt & Banner -->
@@ -1045,6 +1275,22 @@
           </div>
           <div class="hotbar" id="hotbar"></div>
         </div>
+
+        <!-- LIVE SPECTATE HUD BAR (Multiplayer Spectate Mode) -->
+        <div id="spectate-bar" class="spectate-bar hidden" role="region" aria-label="Spectate Controls">
+          <div class="spectate-meta">
+            <span class="spectate-badge">SPECTATING</span>
+            <div class="spectate-target-info">
+              <span id="spectate-target-name" class="spectate-target-name">Player · Gmail AI</span>
+              <span id="spectate-target-vitals" class="spectate-target-vitals">HP 100 · SHD 0</span>
+            </div>
+          </div>
+          <div class="spectate-controls">
+            <button type="button" id="btn-spectate-prev" class="spectate-btn" title="Previous Player">‹ Prev</button>
+            <button type="button" id="btn-spectate-next" class="spectate-btn" title="Next Player">Next ›</button>
+            <button type="button" id="btn-spectate-lobby" class="spectate-btn spectate-btn-exit">Return to Room</button>
+          </div>
+        </div>
       </div>
 
       <!-- FULL TACTICAL CAMPUS MAP OVERLAY [M] -->
@@ -1089,6 +1335,7 @@
               <span class="legend-item"><i class="lg-swatch lg-drop"></i>Supply Drop</span>
               <span class="legend-item"><i class="lg-swatch lg-wp"></i>Waypoint</span>
               <span class="legend-item"><i class="lg-swatch lg-storm"></i>Storm</span>
+              <span class="legend-item hidden" id="legend-teammate"><i class="lg-swatch lg-teammate"></i>Teammate</span>
             </div>
           </div>
         </div>
@@ -1120,6 +1367,10 @@
               <span class="sum-bullet-left"><span class="sum-label">Play Mode</span></span>
               <span class="sum-val" id="go-mode">Battle Royale</span>
             </li>
+            <li class="sum-bullet-item hidden" id="go-team-row">
+              <span class="sum-bullet-left"><span class="sum-label">Team</span></span>
+              <span class="sum-val" id="go-team">Blue Team</span>
+            </li>
             <li class="sum-bullet-item">
               <span class="sum-bullet-left"><span class="sum-label">Character</span></span>
               <span class="sum-val" id="go-hero">Gmail AI</span>
@@ -1148,6 +1399,8 @@
           <div class="modal-actions modal-actions-3">
             <button type="button" id="btn-play-again" class="btn-primary">Drop Again</button>
             <button type="button" id="btn-change-hero" class="btn-tonal">Change Character</button>
+            <button type="button" id="btn-gameover-spectate" class="btn-primary hidden">Spectate Match</button>
+            <button type="button" id="btn-gameover-room" class="btn-tonal hidden">Back to Room Lobby</button>
             <button type="button" id="btn-gameover-home" class="btn-outlined">Home</button>
           </div>
         </div>

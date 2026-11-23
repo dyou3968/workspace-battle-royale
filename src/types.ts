@@ -454,6 +454,23 @@ export interface HudSnapshot {
   waypointDist?: number | null;
   pointerLocked: boolean;
   matchPhase: 'lobby' | 'skydrop' | 'playing' | 'ended';
+  multiplayer?: {
+    active: boolean;
+    roomCode: string;
+    format: 'ffa' | 'teams';
+    teamId: 'blue' | 'red' | 'yellow' | 'green' | null;
+    aliveTeams: number;
+    rttMs: number;
+  } | null;
+  spectating?: {
+    active: boolean;
+    targetId: string;
+    targetName: string;
+    targetHeroId: ProductHeroId;
+    health: number;
+    shield: number;
+    teamId: 'blue' | 'red' | 'yellow' | 'green' | null;
+  } | null;
 }
 
 export interface MinimapEntity {
@@ -462,6 +479,9 @@ export interface MinimapEntity {
   color?: string;
   revealed?: boolean;
   isBot?: boolean;
+  isTeammate?: boolean;
+  name?: string;
+  teamColor?: string;
 }
 
 export interface MinimapLootPip {
@@ -559,4 +579,9 @@ export interface MatchSummary {
   survivedSeconds: number;
   botDifficulty: BotDifficulty;
   gameMode: GameModeId;
+  isMultiplayer?: boolean;
+  matchOngoing?: boolean;
+  teamId?: 'blue' | 'red' | 'yellow' | 'green' | null;
+  winnerTeamId?: 'blue' | 'red' | 'yellow' | 'green' | null;
+  winnerName?: string;
 }

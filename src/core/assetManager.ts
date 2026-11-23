@@ -41,6 +41,7 @@ export interface HeroInstance {
   gliderMount: THREE.Group;
   overheadGroup: THREE.Group;
   hpBarFill: THREE.Mesh;
+  shieldBarBg: THREE.Mesh;
   shieldBarFill: THREE.Mesh;
   revealRing: THREE.Mesh;
   /** Cached hero meshes toggled by AssetManager.setHeroCastShadow() without per-frame traversal */
@@ -62,6 +63,8 @@ export interface HeroInstance {
   flashHit: (colorHex?: number, intensity?: number) => void;
   /** Reset emissive tint back to resting values */
   clearFlash: () => void;
+  /** Lazily create or update a crisp compact overhead player nameplate billboard above HP/Shield bars */
+  setNameplate: (name: string, teamColorCss?: string | null) => void;
 }
 
 export interface WeaponInstance {
@@ -896,6 +899,12 @@ export class AssetManager {
     overheadGroup.add(shieldBarFill);
     root.add(overheadGroup);
 
+    // Lazy overhead player nameplate billboard (allocated only when setNameplate() is called)
+    let nameplateSprite: THREE.Sprite | null = null;
+    let nameplateCanvas: HTMLCanvasElement | null = null;
+    let nameplateTexture: THREE.CanvasTexture | null = null;
+    let nameplateKey = '';
+
     // Glowing emerald Chat-reveal wallhack beacon ring (depthTest: false!)
     const revealMat = new THREE.MeshBasicMaterial({
       color: 0x10b981,
@@ -936,6 +945,7 @@ export class AssetManager {
       gliderMount,
       overheadGroup,
       hpBarFill,
+      shieldBarBg: shieldBg,
       shieldBarFill,
       revealRing,
       shadowMeshes,
@@ -1153,6 +1163,123 @@ export class AssetManager {
           clonedMaterials[i].emissive.copy(baseEmissives[i]);
           clonedMaterials[i].emissiveIntensity = baseEmissiveIntensities[i];
         }
+      },
+      setNameplate(name: string, teamColorCss?: string | null) {
+        const cleanName = String(name ?? '').trim().slice(0, 18);
+        if (!cleanName) {
+          if (nameplateSprite) nameplateSprite.visible = false;
+          return;
+        }
+        const colorKey = teamColorCss?.trim() || '';
+        const nextKey = `${cleanName}|${colorKey}`;
+        if (nextKey === nameplateKey && nameplateSprite) {
+          nameplateSprite.visible = true;
+          return;
+        }
+        nameplateKey = nextKey;
+
+        if (!nameplateCanvas) {
+          nameplateCanvas = document.createElement('canvas');
+          nameplateCanvas.width = 256;
+          nameplateCanvas.height = 64;
+        }
+        const ctx = nameplateCanvas.getContext('2d');
+        if (!ctx) return;
+
+        const W = 256;
+        const H = 64;
+        ctx.clearRect(0, 0, W, H);
+
+        const hasDot = colorKey.length > 0;
+        const dotRadius = 6.5;
+        const dotGap = 9;
+        const padX = 16;
+        let fontSize = 22;
+        const fontFamily = '-apple-system, BlinkMacSystemFont, "Google Sans", "Inter", sans-serif';
+        ctx.font = `700 ${fontSize}px ${fontFamily}`;
+
+        const maxContentW = W - 16 - padX * 2 - (hasDot ? dotRadius * 2 + dotGap : 0);
+        let textW = ctx.measureText(cleanName).width;
+        while (textW > maxContentW && fontSize > 14) {
+          fontSize -= 1;
+          ctx.font = `700 ${fontSize}px ${fontFamily}`;
+          textW = ctx.measureText(cleanName).width;
+        }
+
+        const contentW = textW + (hasDot ? dotRadius * 2 + dotGap : 0);
+        const pillW = Math.min(W - 8, Math.max(76, Math.ceil(contentW + padX * 2)));
+        const pillH = 42;
+        const pillX = Math.round((W - pillW) * 0.5);
+        const pillY = Math.round((H - pillH) * 0.5);
+        const radius = pillH * 0.5;
+
+        // Sleek dark frosted pill background
+        ctx.beginPath();
+        ctx.moveTo(pillX + radius, pillY);
+        ctx.lineTo(pillX + pillW - radius, pillY);
+        ctx.quadraticCurveTo(pillX + pillW, pillY, pillX + pillW, pillY + radius);
+        ctx.lineTo(pillX + pillW, pillY + pillH - radius);
+        ctx.quadraticCurveTo(pillX + pillW, pillY + pillH, pillX + pillW - radius, pillY + pillH);
+        ctx.lineTo(pillX + radius, pillY + pillH);
+        ctx.quadraticCurveTo(pillX, pillY + pillH, pillX, pillY + pillH - radius);
+        ctx.lineTo(pillX, pillY + radius);
+        ctx.quadraticCurveTo(pillX, pillY, pillX + radius, pillY);
+        ctx.closePath();
+
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+        ctx.fill();
+        ctx.lineWidth = 2.4;
+        ctx.strokeStyle = hasDot ? colorKey : 'rgba(255, 255, 255, 0.34)';
+        ctx.stroke();
+
+        const centerY = pillY + pillH * 0.5;
+        let cursorX = Math.round((W - contentW) * 0.5);
+
+        if (hasDot) {
+          ctx.beginPath();
+          ctx.arc(cursorX + dotRadius, centerY, dotRadius, 0, Math.PI * 2);
+          ctx.fillStyle = colorKey;
+          ctx.fill();
+          ctx.lineWidth = 1.6;
+          ctx.strokeStyle = '#ffffff';
+          ctx.stroke();
+          cursorX += dotRadius * 2 + dotGap;
+        }
+
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.65)';
+        ctx.shadowBlur = 3;
+        ctx.fillText(cleanName, cursorX, centerY + 1);
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+
+        if (!nameplateTexture) {
+          nameplateTexture = new THREE.CanvasTexture(nameplateCanvas);
+          nameplateTexture.colorSpace = THREE.SRGBColorSpace;
+          nameplateTexture.minFilter = THREE.LinearFilter;
+          nameplateTexture.magFilter = THREE.LinearFilter;
+          nameplateTexture.generateMipmaps = false;
+        } else {
+          nameplateTexture.needsUpdate = true;
+        }
+
+        if (!nameplateSprite) {
+          const spriteMat = new THREE.SpriteMaterial({
+            map: nameplateTexture,
+            transparent: true,
+            depthTest: false,
+            depthWrite: false,
+          });
+          nameplateSprite = new THREE.Sprite(spriteMat);
+          nameplateSprite.name = 'PlayerNameplate';
+          nameplateSprite.position.set(0, 0.36, 0.01);
+          nameplateSprite.scale.set(1.24, 0.31, 1);
+          nameplateSprite.renderOrder = 52;
+          overheadGroup.add(nameplateSprite);
+        }
+        nameplateSprite.visible = true;
       },
     };
 

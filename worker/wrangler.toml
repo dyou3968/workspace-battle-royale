@@ -1,0 +1,12 @@
+name = "workspace-battle-royale-rt"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "GAME_ROOM"
+class_name = "GameRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameRoom"]

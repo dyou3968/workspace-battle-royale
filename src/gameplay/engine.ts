@@ -84,6 +84,32 @@ import {
   BotSupplyDropSnapshot,
   BotWorldContext,
 } from '../ai/botBrain';
+import { MultiplayerClient } from '../net/mpClient';
+import {
+  BotStateSample,
+  createSeededRng,
+  DamageEvent,
+  ElimEvent,
+  FireFxEvent,
+  FLAG_ADS,
+  FLAG_CHANNELING,
+  FLAG_CROUCHING,
+  FLAG_GROUNDED,
+  FLAG_RELOADING,
+  FLAG_REWINDING,
+  FLAG_SKYDROPPING,
+  FLAG_SLIDING,
+  FLAG_SPRINTING,
+  MatchEndPayload,
+  MatchStartPayload,
+  PeerStateUpdate,
+  RoomFormat,
+  ServerMessage,
+  SyncedGroundLoot,
+  TEAM_CONFIG,
+  TeamId,
+  UltCastEvent,
+} from '../net/protocol';
 
 export interface HudCallbacks {
   onHudUpdate: (snapshot: HudSnapshot) => void;
@@ -135,15 +161,39 @@ interface PendingSlidesBeam {
   origin: THREE.Vector3;
   dir: THREE.Vector3;
   remaining: number;
+  visualOnly?: boolean;
+}
+
+interface RemoteNetTarget {
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  yaw: number;
+  pitch: number;
+  flags: number;
+  weaponId: WeaponId | null;
+  weaponRarity: Rarity | null;
+  bikeId: string | null;
+  bikeSteer: number;
+  bikeLean: number;
+  bikeSpeed: number;
+  receivedAt: number;
 }
 
 interface Combatant {
   id: string;
   name: string;
   isPlayer: boolean;
+  isRemoteHuman: boolean;
+  teamId: TeamId | null;
   heroId: ProductHeroId;
   botTier?: BotTier;
   brain?: BotBrain;
+  netTarget?: RemoteNetTarget;
+  remoteRewindGhostTimer: number;
 
   hero: HeroInstance;
   gliderMesh: THREE.Group;
@@ -274,6 +324,7 @@ interface Projectile {
   color: number;
   targetId?: string;
   mesh?: THREE.Object3D;
+  visualOnly?: boolean;
 }
 
 interface GroundLoot {
@@ -391,6 +442,21 @@ const BOT_CALLSIGNS: Record<ProductHeroId, string[]> = {
 };
 
 const ALL_HERO_IDS: ProductHeroId[] = ['gmail', 'drive', 'calendar', 'chat', 'slides', 'docs'];
+
+const CENTRAL_STORM_ANCHORS: readonly [number, number][] = [
+  [-51, 4],     // Stan Plaza (Core Quad)
+  [26, -6],     // Charleston Park
+  [-70, 2],     // Quad Skybridge
+  [62, 2],      // Joaquin Corridor
+  [113, 4],     // Gradient Canopy
+  [-35, -12],   // B40 / Partner Plex
+  [58, -122],   // Shoreline Amphitheatre Concourse
+  [-62, -144],  // Bay Point Shoreline Overlook
+  [-185, 2],    // Google 2000 / 1950 Creek Plaza
+  [-92, 110],   // 1098 Alta / Huff Corridor
+  [28, 114],    // Charleston Campus Courtyard
+  [196, -16],   // N Shoreline Blvd / Google 2015
+];
 
 /**
  * Calibrated glider hand-grip offset in `hero.model` local space (measured by @anim-blender across all 6 heroes):
@@ -539,6 +605,30 @@ export class WorkspaceRoyaleEngine {
   private visibleBotCount = 0;
   private mapOpen = false;
   private waypoint: MapWaypoint | null = null;
+
+  // Multiplayer Session State (completely inactive in Offline Solo mode)
+  private mpActive = false;
+  private mpClient: MultiplayerClient | null = null;
+  private mpUnsubMessage: (() => void) | null = null;
+  private mpRoomCode = '';
+  private mpMatchId = '';
+  private mpSelfId = '';
+  private mpHostId = '';
+  private mpFormat: RoomFormat = 'ffa';
+  private mpTeamId: TeamId | null = null;
+  private mpAliveTeams = 0;
+  private mpRng: (() => number) | null = null;
+  private mpStateSendAccum = 0;
+  private mpBotBatchAccum = 0;
+  private mpPendingBikeClaimId: string | null = null;
+  private mpPendingBikeClaimAt = 0;
+  private mpPendingLootClaims = new Map<string, number>();
+  private mpPendingChestOpens = new Set<string>();
+  private mpPendingDropOpens = new Set<string>();
+
+  // Live Spectate Mode State (Multiplayer post-elimination)
+  private spectateActive = false;
+  private spectateTargetId: string | null = null;
 
   // Reusable scratch math objects
   private readonly tmpVecA = new THREE.Vector3();
@@ -795,7 +885,7 @@ export class WorkspaceRoyaleEngine {
       if (document.pointerLockElement === this.renderer.domElement) {
         document.exitPointerLock();
       }
-    } else if (this.matchPhase === 'skydrop' || this.matchPhase === 'playing') {
+    } else if (!this.spectateActive && (this.matchPhase === 'skydrop' || this.matchPhase === 'playing')) {
       this.requestPointerLock();
     }
     if (this.matchPhase === 'skydrop' || this.matchPhase === 'playing') {
@@ -841,6 +931,9 @@ export class WorkspaceRoyaleEngine {
   }
 
   public pauseToLobby(): void {
+    this.detachMpSessionState();
+    this.spectateActive = false;
+    this.spectateTargetId = null;
     this.matchPhase = 'lobby';
     this.mapOpen = false;
     this.waypoint = null;
@@ -858,11 +951,355 @@ export class WorkspaceRoyaleEngine {
     this.emitHudSnapshot();
   }
 
+  public isInMultiplayerMatch(): boolean {
+    return this.mpActive;
+  }
+
+  public isSpectating(): boolean {
+    return this.spectateActive;
+  }
+
+  private get isMpHost(): boolean {
+    return this.mpActive && this.mpSelfId.length > 0 && this.mpSelfId === this.mpHostId;
+  }
+
+  private isFriendly(a: Combatant | null | undefined, b: Combatant | null | undefined): boolean {
+    if (!this.mpActive || this.mpFormat !== 'teams') return false;
+    if (!a || !b || a.id === b.id) return false;
+    return a.teamId !== null && a.teamId === b.teamId;
+  }
+
+  private isFriendlyId(a: Combatant | null | undefined, otherId: string | null | undefined): boolean {
+    if (!this.mpActive || this.mpFormat !== 'teams' || !a || !a.teamId || !otherId || a.id === otherId) {
+      return false;
+    }
+    const other = this.combatants.find((c) => c.id === otherId);
+    return Boolean(other && other.teamId === a.teamId);
+  }
+
+  private detachMpSessionState(): void {
+    if (this.mpUnsubMessage) {
+      this.mpUnsubMessage();
+      this.mpUnsubMessage = null;
+    }
+    this.mpActive = false;
+    this.mpClient = null;
+    this.mpRoomCode = '';
+    this.mpMatchId = '';
+    this.mpSelfId = '';
+    this.mpHostId = '';
+    this.mpFormat = 'ffa';
+    this.mpTeamId = null;
+    this.mpAliveTeams = 0;
+    this.mpRng = null;
+    this.mpStateSendAccum = 0;
+    this.mpBotBatchAccum = 0;
+    this.mpPendingBikeClaimId = null;
+    this.mpPendingBikeClaimAt = 0;
+    this.mpPendingLootClaims.clear();
+    this.mpPendingChestOpens.clear();
+    this.mpPendingDropOpens.clear();
+  }
+
+  public leaveMultiplayerMatch(): void {
+    this.detachMpSessionState();
+    this.spectateActive = false;
+    this.spectateTargetId = null;
+    this.matchPhase = 'lobby';
+    this.mapOpen = false;
+    this.waypoint = null;
+    this.mouseLeftDown = false;
+    this.mouseRightDown = false;
+    this.sprintLatchedOnReload = false;
+    this.sprintLatchedOnChannel = false;
+    this.sprintLatchedOnSlide = false;
+    this.ctrlSlideConsumed = false;
+    this.keys.clear();
+    this.audio.setGliderWind(false);
+    if (document.pointerLockElement === this.renderer.domElement) {
+      document.exitPointerLock();
+    }
+    this.clearMatchEntities();
+    this.emitHudSnapshot();
+  }
+
+  private getSpectateCandidates(): Combatant[] {
+    const alive = this.combatants.filter((c) => c.alive && c.id !== this.mpSelfId);
+    if (alive.length === 0) return [];
+    const score = (c: Combatant): number => {
+      const mate = this.mpFormat === 'teams' && this.mpTeamId !== null && c.teamId === this.mpTeamId;
+      if (mate && c.isRemoteHuman) return 0;
+      if (mate) return 1;
+      if (c.isRemoteHuman) return 2;
+      return 3;
+    };
+    return alive.sort((a, b) => score(a) - score(b) || a.id.localeCompare(b.id));
+  }
+
+  private pickBestSpectateTarget(preferKillerId?: string | null): Combatant | null {
+    const candidates = this.getSpectateCandidates();
+    if (candidates.length === 0) {
+      this.spectateTargetId = null;
+      this.spectateActive = false;
+      return null;
+    }
+    // In Teams mode, prioritize alive teammates first; in FFA, prefer the player who eliminated us
+    if (this.mpFormat === 'teams' && this.mpTeamId) {
+      const mate = candidates.find((c) => c.teamId === this.mpTeamId);
+      if (mate) {
+        this.spectateTargetId = mate.id;
+        return mate;
+      }
+    }
+    if (preferKillerId) {
+      const killer = candidates.find((c) => c.id === preferKillerId);
+      if (killer) {
+        this.spectateTargetId = killer.id;
+        return killer;
+      }
+    }
+    this.spectateTargetId = candidates[0].id;
+    return candidates[0];
+  }
+
+  public startSpectating(): boolean {
+    if (!this.mpActive || this.matchPhase === 'ended' || this.matchPhase === 'lobby') {
+      return false;
+    }
+    const target = this.pickBestSpectateTarget(this.player?.lastAttackerId ?? null);
+    if (!target) {
+      this.spectateActive = false;
+      return false;
+    }
+    this.spectateActive = true;
+    this.mapOpen = false;
+    this.mouseLeftDown = false;
+    this.mouseRightDown = false;
+    this.keys.clear();
+    if (document.pointerLockElement === this.renderer.domElement) {
+      document.exitPointerLock();
+    }
+    this.camController.reset(target.pos, target.yaw);
+    this.emitHudSnapshot();
+    return true;
+  }
+
+  public cycleSpectateTarget(delta: number): void {
+    if (!this.spectateActive) return;
+    const candidates = this.getSpectateCandidates();
+    if (candidates.length === 0) {
+      this.spectateActive = false;
+      this.spectateTargetId = null;
+      this.emitHudSnapshot();
+      return;
+    }
+    const curIdx = candidates.findIndex((c) => c.id === this.spectateTargetId);
+    const step = delta >= 0 ? 1 : -1;
+    const nextIdx =
+      curIdx < 0 ? 0 : (curIdx + step + candidates.length) % candidates.length;
+    const nextTarget = candidates[nextIdx];
+    this.spectateTargetId = nextTarget.id;
+    this.camController.reset(nextTarget.pos, nextTarget.yaw);
+    this.emitHudSnapshot();
+  }
+
+  private getCameraFocusCombatant(): Combatant | null {
+    if (this.spectateActive && this.spectateTargetId) {
+      const target = this.combatants.find((c) => c.id === this.spectateTargetId && c.alive);
+      if (target) return target;
+    }
+    return this.player;
+  }
+
+  private getCameraFocusPos(): THREE.Vector3 {
+    const focus = this.getCameraFocusCombatant();
+    return focus ? focus.pos : this.camController.camera.position;
+  }
+
+  private computeAliveTeamsCount(): number {
+    if (!this.mpActive || this.mpFormat !== 'teams') {
+      return this.combatants.filter((c) => c.alive).length;
+    }
+    const teams = new Set<TeamId>();
+    for (const c of this.combatants) {
+      if (c.alive && c.teamId) {
+        teams.add(c.teamId);
+      }
+    }
+    return teams.size;
+  }
+
+  public startMultiplayerMatch(
+    client: MultiplayerClient,
+    payload: MatchStartPayload,
+    selfId: string
+  ): void {
+    this.stopSplashAttract();
+    this.detachMpSessionState();
+    this.spectateActive = false;
+    this.spectateTargetId = null;
+
+    if (!this.world) {
+      this.world = new GoogleplexWorld(this.scene, this.renderer, this.assetManager, this.physics);
+      this.world.setShadowMapSize(QUALITY_PRESETS[this.qualityPreset].shadowMapSize);
+    }
+    this.audio.unlock();
+    this.clearMatchEntities();
+
+    this.mpActive = true;
+    this.mpClient = client;
+    this.mpRoomCode = client.roomCode ?? '';
+    this.mpMatchId = payload.matchId;
+    this.mpSelfId = selfId;
+    this.mpHostId = payload.hostId;
+    this.mpFormat = payload.settings.format;
+    this.mpRng = createSeededRng(payload.seed);
+
+    const mode = GAME_MODES[payload.settings.mode] ?? GAME_MODES.battle_royale;
+    this.activeGameMode = mode.id;
+    this.activeBotDifficulty = mode.forceBotDifficulty ?? payload.settings.botDifficulty;
+    this.matchPhase = 'skydrop';
+    this.matchElapsed = 0;
+    this.supplyDropsSpawned = 0;
+    this.unarmedHintCooldown = 0;
+    this.crouchToggled = false;
+    this.sprintLatchedOnReload = false;
+    this.sprintLatchedOnChannel = false;
+    this.sprintLatchedOnSlide = false;
+    this.ctrlSlideConsumed = false;
+    this.mapOpen = false;
+    this.waypoint = null;
+    this.visibleChestCount = 0;
+    this.visibleBotCount = 0;
+    this.mouseLeftDown = false;
+    this.mouseRightDown = false;
+    this.keys.clear();
+
+    // Deterministic Storm Anchor matching server payload across every peer
+    const anchorIdx =
+      ((payload.stormAnchorIndex % CENTRAL_STORM_ANCHORS.length) + CENTRAL_STORM_ANCHORS.length) %
+      CENTRAL_STORM_ANCHORS.length;
+    const [anchorX, anchorZ] = CENTRAL_STORM_ANCHORS[anchorIdx];
+    this.stormPhaseIndex = 0;
+    this.stormMode = 'wait';
+    this.stormCenterX = 0;
+    this.stormCenterZ = 0;
+    this.stormRadius = mode.initialStormRadius;
+    this.stormStartCenterX = 0;
+    this.stormStartCenterZ = 0;
+    this.stormStartRadius = mode.initialStormRadius;
+
+    if (mode.stormEnabled) {
+      this.stormPhaseTimer = STORM_PHASES[0].waitDuration * mode.stormPaceMult;
+      this.nextStormCenterX = anchorX + payload.stormOffsetX;
+      this.nextStormCenterZ = anchorZ + payload.stormOffsetZ;
+      this.nextStormRadius = Math.min(mode.initialStormRadius, STORM_PHASES[0].targetRadius);
+    } else {
+      this.stormPhaseTimer = 0;
+      this.nextStormCenterX = 0;
+      this.nextStormCenterZ = 0;
+      this.nextStormRadius = mode.initialStormRadius;
+    }
+    this.world.updateStormVisual(this.stormCenterX, this.stormCenterZ, this.stormRadius, 0);
+
+    // Deterministic shared campus chests (identical chest_1..N IDs and Tier 1-3 rolls!) & 18 GBikes
+    this.spawnInitialCampusChests(this.mpRng);
+    this.spawnInitialCampusGBikes();
+
+    const dropRing = this.world.gliderDropPoints;
+    const selfSpec = payload.combatants.find((s) => s.id === selfId) ?? null;
+    this.mpTeamId = this.mpFormat === 'teams' ? (selfSpec?.teamId ?? null) : null;
+
+    let botIndex = 0;
+    const totalBots = Math.max(1, payload.combatants.filter((s) => !s.isHuman).length);
+
+    for (let i = 0; i < payload.combatants.length; i++) {
+      const spec = payload.combatants[i];
+      const dp =
+        dropRing.length > 0
+          ? dropRing[((spec.dropIndex % dropRing.length) + dropRing.length) % dropRing.length]
+          : {
+              x: Math.cos((i / Math.max(1, payload.combatants.length)) * Math.PI * 2) * 255,
+              y: GAME_CONSTANTS.SKY_DROP_ALTITUDE,
+              z: Math.sin((i / Math.max(1, payload.combatants.length)) * Math.PI * 2) * 158,
+              heading: 0,
+            };
+
+      const isSelf = spec.id === selfId;
+      const isRemoteHuman = spec.isHuman && !isSelf;
+      const teamId: TeamId | null = this.mpFormat === 'teams' ? spec.teamId : null;
+      const botTier: BotTier | undefined = !spec.isHuman ? (spec.botTier ?? 'tactical') : undefined;
+      const brain =
+        !spec.isHuman && this.isMpHost
+          ? new BotBrain(getBotProfile(botTier ?? 'tactical'), this.world.landmarks)
+          : undefined;
+
+      const combatant = this.spawnCombatant({
+        id: spec.id,
+        name: spec.name,
+        isPlayer: isSelf,
+        isRemoteHuman,
+        teamId,
+        heroId: spec.heroId,
+        botTier,
+        brain,
+        botIndex: !spec.isHuman ? botIndex++ : undefined,
+        totalBots,
+        x: dp.x,
+        y: dp.y,
+        z: dp.z,
+        yaw: dp.heading,
+      });
+
+      if (isSelf) {
+        this.player = combatant;
+      } else {
+        const isMate = this.mpFormat === 'teams' && teamId !== null && teamId === this.mpTeamId;
+        const teamColorCss = teamId ? TEAM_CONFIG[teamId].colorCss : null;
+        if (isRemoteHuman || isMate) {
+          combatant.hero.setNameplate(spec.name, teamColorCss);
+        }
+        if (isMate && teamId) {
+          const hpMat = combatant.hero.hpBarFill.material as THREE.MeshBasicMaterial;
+          hpMat.color.setHex(TEAM_CONFIG[teamId].hex);
+        }
+      }
+    }
+
+    this.mpAliveTeams = this.computeAliveTeamsCount();
+
+    // Subscribe to live GameRoom server broadcasts
+    this.mpUnsubMessage = client.onMessage((msg) => this.handleMpMessage(msg));
+
+    if (this.player) {
+      this.camController.reset(this.player.pos, this.player.yaw);
+    }
+    this.audio.setGliderWind(true, false);
+    this.requestPointerLock();
+
+    if (this.mpFormat === 'teams' && this.mpTeamId) {
+      const tLabel = TEAM_CONFIG[this.mpTeamId].label.toUpperCase();
+      this.callbacks.onAnnouncement(
+        `TEAM ${tLabel} — DROP IN!`,
+        `Room ${this.mpRoomCode} · Coordinate with your squad & outlast rival teams`
+      );
+    } else {
+      this.callbacks.onAnnouncement(
+        'DROP INTO GOOGLEPLEX',
+        `Private Room ${this.mpRoomCode} · ${payload.combatants.length} Combatants`
+      );
+    }
+    this.emitHudSnapshot();
+  }
+
   public startMatch(
     heroId: ProductHeroId,
     botDifficulty: BotDifficulty,
     modeId: GameModeId = 'battle_royale'
   ): void {
+    this.detachMpSessionState();
+    this.spectateActive = false;
+    this.spectateTargetId = null;
     this.stopSplashAttract();
     if (!this.world) {
       this.world = new GoogleplexWorld(this.scene, this.renderer, this.assetManager, this.physics);
@@ -893,21 +1330,8 @@ export class WorkspaceRoyaleEngine {
     this.keys.clear();
 
     // Initialize Storm per Play Mode (disabled & parked outside arena in Campus Free Roam)
-    const centralAnchors: [number, number][] = [
-      [-51, 4],     // Stan Plaza (Core Quad)
-      [26, -6],     // Charleston Park
-      [-70, 2],     // Quad Skybridge
-      [62, 2],      // Joaquin Corridor
-      [113, 4],     // Gradient Canopy
-      [-35, -12],   // B40 / Partner Plex
-      [58, -122],   // Shoreline Amphitheatre Concourse
-      [-62, -144],  // Bay Point Shoreline Overlook
-      [-185, 2],    // Google 2000 / 1950 Creek Plaza
-      [-92, 110],   // 1098 Alta / Huff Corridor
-      [28, 114],    // Charleston Campus Courtyard
-      [196, -16],   // N Shoreline Blvd / Google 2015
-    ];
-    const [anchorX, anchorZ] = centralAnchors[Math.floor(Math.random() * centralAnchors.length)];
+    const [anchorX, anchorZ] =
+      CENTRAL_STORM_ANCHORS[Math.floor(Math.random() * CENTRAL_STORM_ANCHORS.length)];
     this.stormPhaseIndex = 0;
     this.stormMode = 'wait';
     this.stormCenterX = 0;
@@ -1030,6 +1454,8 @@ export class WorkspaceRoyaleEngine {
     id: string;
     name: string;
     isPlayer: boolean;
+    isRemoteHuman?: boolean;
+    teamId?: TeamId | null;
     heroId: ProductHeroId;
     botTier?: BotTier;
     brain?: BotBrain;
@@ -1061,9 +1487,13 @@ export class WorkspaceRoyaleEngine {
       id: opts.id,
       name: opts.name,
       isPlayer: opts.isPlayer,
+      isRemoteHuman: Boolean(opts.isRemoteHuman),
+      teamId: opts.teamId ?? null,
       heroId: opts.heroId,
       botTier: opts.botTier,
       brain: opts.brain,
+      netTarget: undefined,
+      remoteRewindGhostTimer: 0,
       hero,
       gliderMesh,
       weaponInstance: null,
@@ -1240,6 +1670,13 @@ export class WorkspaceRoyaleEngine {
     this.soundEvents.length = 0;
     this.pendingBeams.length = 0;
     this.vfx.clear();
+
+    // Reset deterministic entity ID counters so chest_1..N and gbike_1..18 match 1:1 across all MP peers
+    this.nextProjectileSeq = 1;
+    this.nextLootSeq = 1;
+    this.nextChestSeq = 1;
+    this.nextBarrierSeq = 1;
+    this.nextGBikeSeq = 1;
   }
 
   private computeChestYaw(x: number, y: number, z: number): number {
@@ -1298,11 +1735,22 @@ export class WorkspaceRoyaleEngine {
     return CHEST_FRONT_Z_SIGN >= 0 ? Math.atan2(dx, dz) : Math.atan2(-dx, -dz);
   }
 
-  private spawnInitialCampusChests(): void {
+  private rollChestTierSeeded(highTier: boolean, rng?: () => number): ChestTier {
+    if (!rng) return rollChestTier(highTier);
+    const r = rng();
+    if (highTier) {
+      return r < 0.55 ? 2 : 3;
+    }
+    if (r < 0.50) return 1;
+    if (r < 0.85) return 2;
+    return 3;
+  }
+
+  private spawnInitialCampusChests(rng?: () => number): void {
     if (!this.world) return;
     const mode = GAME_MODES[this.activeGameMode] ?? GAME_MODES.battle_royale;
     for (const spot of this.world.lootSpots) {
-      let tier = rollChestTier(spot.highTier);
+      let tier = this.rollChestTierSeeded(spot.highTier, rng);
       if (mode.minChestTier && tier < mode.minChestTier) {
         tier = mode.minChestTier;
       }
@@ -1323,7 +1771,7 @@ export class WorkspaceRoyaleEngine {
         opened: false,
         lidProgress: 0,
         visual,
-        pulsePhase: Math.random() * Math.PI * 2,
+        pulsePhase: (rng ? rng() : Math.random()) * Math.PI * 2,
       });
     }
   }
@@ -1373,8 +1821,12 @@ export class WorkspaceRoyaleEngine {
     itemId: WeaponId | UtilityItemId,
     rarity: Rarity,
     count = 1,
-    popFrom?: { x: number; y: number; z: number }
-  ): void {
+    popFrom?: { x: number; y: number; z: number },
+    explicitId?: string
+  ): GroundLoot {
+    const id = explicitId ?? `loot_${this.nextLootSeq++}`;
+    const existing = this.lootDrops.find((l) => l.id === id);
+    if (existing) return existing;
     const visual = this.assetManager.createLootDropVisual(kind, itemId, rarity);
     if (popFrom) {
       visual.root.position.set(popFrom.x, popFrom.y, popFrom.z);
@@ -1382,8 +1834,8 @@ export class WorkspaceRoyaleEngine {
       visual.root.position.set(x, y, z);
     }
     this.scene.add(visual.root);
-    this.lootDrops.push({
-      id: `loot_${this.nextLootSeq++}`,
+    const entry: GroundLoot = {
+      id,
       x,
       y,
       z,
@@ -1397,15 +1849,96 @@ export class WorkspaceRoyaleEngine {
       popStartY: popFrom?.y,
       popStartZ: popFrom?.z,
       popProgress: popFrom ? 0 : 1,
-    });
+    };
+    this.lootDrops.push(entry);
+    return entry;
   }
 
-  private openLootChest(chest: LootChestEntity, opener: Combatant): void {
+  private computeChestEjectedLoot(chest: LootChestEntity, opener: Combatant): SyncedGroundLoot[] {
+    const drops = rollChestLoot(chest.tier, this.activeGameMode);
+    const frontYaw =
+      CHEST_FRONT_Z_SIGN >= 0
+        ? Math.atan2(Math.sin(chest.yaw), Math.cos(chest.yaw))
+        : Math.atan2(-Math.sin(chest.yaw), -Math.cos(chest.yaw));
+    const openerDx = opener.pos.x - chest.x;
+    const openerDz = opener.pos.z - chest.z;
+    const openerYaw =
+      Math.hypot(openerDx, openerDz) > 0.25 ? Math.atan2(openerDx, openerDz) : frontYaw;
+
+    const probeOrigin = new THREE.Vector3(chest.x, chest.y + 0.75, chest.z);
+    const frontProbe = new THREE.Vector3(
+      chest.x + Math.sin(frontYaw) * 1.9,
+      chest.y + 0.75,
+      chest.z + Math.cos(frontYaw) * 1.9
+    );
+    const frontSupportY = this.physics.getSupportHeight(frontProbe.x, frontProbe.z, chest.y + 1.2, 0.3, 0.5);
+    const frontClear =
+      this.physics.hasLineOfSight(probeOrigin, frontProbe) && Math.abs(frontSupportY - chest.y) <= 1.25;
+    const baseArcYaw = frontClear ? frontYaw : openerYaw;
+
+    const arcSpan = drops.length === 1 ? 0 : drops.length === 2 ? 0.92 : 1.56;
+    const result: SyncedGroundLoot[] = [];
+
+    drops.forEach((item, idx) => {
+      const frac = drops.length === 1 ? 0 : idx / (drops.length - 1) - 0.5;
+      const ang = baseArcYaw + frac * arcSpan;
+      let ejectDist = drops.length === 1 ? 1.55 : 1.75;
+      let lx = THREE.MathUtils.clamp(
+        chest.x + Math.sin(ang) * ejectDist,
+        GAME_CONSTANTS.ARENA_MIN_X + 3,
+        GAME_CONSTANTS.ARENA_MAX_X - 3
+      );
+      let lz = THREE.MathUtils.clamp(
+        chest.z + Math.cos(ang) * ejectDist,
+        GAME_CONSTANTS.ARENA_MIN_Z + 3,
+        GAME_CONSTANTS.ARENA_MAX_Z - 3
+      );
+
+      const itemProbe = new THREE.Vector3(lx, chest.y + 0.75, lz);
+      let ly = this.physics.getSupportHeight(lx, lz, chest.y + 1.2, 0.3, 0.5);
+      if (!this.physics.hasLineOfSight(probeOrigin, itemProbe) || Math.abs(ly - chest.y) > 1.25) {
+        ejectDist = 1.1;
+        lx = chest.x + Math.sin(openerYaw + frac * 0.65) * ejectDist;
+        lz = chest.z + Math.cos(openerYaw + frac * 0.65) * ejectDist;
+        ly = this.physics.getSupportHeight(lx, lz, chest.y + 1.2, 0.3, 0.5);
+        if (Math.abs(ly - chest.y) > 1.35) {
+          lx = chest.x + Math.sin(openerYaw) * 0.75;
+          lz = chest.z + Math.cos(openerYaw) * 0.75;
+          ly = chest.y;
+        }
+      }
+
+      result.push({
+        id: `${chest.id}_item_${idx}`,
+        kind: item.kind,
+        itemId: item.id,
+        rarity: item.rarity,
+        count: item.count,
+        x: Number(lx.toFixed(2)),
+        y: Number(ly.toFixed(2)),
+        z: Number(lz.toFixed(2)),
+      });
+    });
+
+    return result;
+  }
+
+  private applyOpenedLootChest(
+    chest: LootChestEntity,
+    openerIsLocalPlayer: boolean,
+    syncedLoot: SyncedGroundLoot[]
+  ): void {
     if (chest.opened) return;
     chest.opened = true;
     chest.lidProgress = 0;
 
-    // Swap opened chest accents & ground ring to shared dimmed materials (never mutating shared unopened tier mats)
+    // Cancel any other combatant channeling this same chest
+    for (const c of this.combatants) {
+      if (c.channel?.kind === 'chest' && c.channel.chestId === chest.id) {
+        this.cancelChannel(c);
+      }
+    }
+
     chest.visual.beam.visible = false;
     chest.visual.markOpened?.();
 
@@ -1423,69 +1956,48 @@ export class WorkspaceRoyaleEngine {
       isShield: chest.tier === 2,
     });
 
-    const distToPlayer = this.player ? Math.hypot(chest.x - this.player.pos.x, chest.z - this.player.pos.z) : 0;
+    const listenerPos = this.getCameraFocusPos();
+    const distToListener = Math.hypot(chest.x - listenerPos.x, chest.z - listenerPos.z);
     this.audio.playChestOpenComplete(
       chest.tier,
-      opener.isPlayer ? 0 : distToPlayer,
-      opener.isPlayer ? 0 : this.computeSpatialPan(burstPos)
+      openerIsLocalPlayer ? 0 : distToListener,
+      openerIsLocalPlayer ? 0 : this.computeSpatialPan(burstPos)
     );
 
-    // Eject 1–3 rolled items in a clean semicircular arc right in front of the opened chest
-    const drops = rollChestLoot(chest.tier, this.activeGameMode);
-    const frontYaw =
-      CHEST_FRONT_Z_SIGN >= 0 ? Math.atan2(Math.sin(chest.yaw), Math.cos(chest.yaw)) : Math.atan2(-Math.sin(chest.yaw), -Math.cos(chest.yaw));
-    const openerDx = opener.pos.x - chest.x;
-    const openerDz = opener.pos.z - chest.z;
-    const openerYaw =
-      Math.hypot(openerDx, openerDz) > 0.25 ? Math.atan2(openerDx, openerDz) : frontYaw;
-
-    // Prefer chest front direction, falling back to opener's side if chest faces into a wall/drop-off
-    const probeOrigin = new THREE.Vector3(chest.x, chest.y + 0.75, chest.z);
-    const frontProbe = new THREE.Vector3(
-      chest.x + Math.sin(frontYaw) * 1.9,
-      chest.y + 0.75,
-      chest.z + Math.cos(frontYaw) * 1.9
-    );
-    const frontSupportY = this.physics.getSupportHeight(frontProbe.x, frontProbe.z, chest.y + 1.2, 0.3, 0.5);
-    const frontClear =
-      this.physics.hasLineOfSight(probeOrigin, frontProbe) && Math.abs(frontSupportY - chest.y) <= 1.25;
-    const baseArcYaw = frontClear ? frontYaw : openerYaw;
-
-    const arcSpan = drops.length === 1 ? 0 : drops.length === 2 ? 0.92 : 1.56;
     const ejectOrigin = { x: chest.x, y: chest.y + 0.38, z: chest.z };
-
-    drops.forEach((item, idx) => {
-      const frac = drops.length === 1 ? 0 : idx / (drops.length - 1) - 0.5;
-      const ang = baseArcYaw + frac * arcSpan;
-      let ejectDist = drops.length === 1 ? 1.55 : 1.75;
-      let lx = THREE.MathUtils.clamp(
-        chest.x + Math.sin(ang) * ejectDist,
-        GAME_CONSTANTS.ARENA_MIN_X + 3,
-        GAME_CONSTANTS.ARENA_MAX_X - 3
+    for (const item of syncedLoot) {
+      this.spawnLootDrop(
+        item.x,
+        item.y,
+        item.z,
+        item.kind,
+        item.itemId as WeaponId | UtilityItemId,
+        item.rarity,
+        item.count ?? 1,
+        ejectOrigin,
+        item.id
       );
-      let lz = THREE.MathUtils.clamp(
-        chest.z + Math.cos(ang) * ejectDist,
-        GAME_CONSTANTS.ARENA_MIN_Z + 3,
-        GAME_CONSTANTS.ARENA_MAX_Z - 3
-      );
+    }
+  }
 
-      // Keep popped item on same walkable floor and unobstructed by walls/furniture
-      const itemProbe = new THREE.Vector3(lx, chest.y + 0.75, lz);
-      let ly = this.physics.getSupportHeight(lx, lz, chest.y + 1.2, 0.3, 0.5);
-      if (!this.physics.hasLineOfSight(probeOrigin, itemProbe) || Math.abs(ly - chest.y) > 1.25) {
-        ejectDist = 1.1;
-        lx = chest.x + Math.sin(openerYaw + frac * 0.65) * ejectDist;
-        lz = chest.z + Math.cos(openerYaw + frac * 0.65) * ejectDist;
-        ly = this.physics.getSupportHeight(lx, lz, chest.y + 1.2, 0.3, 0.5);
-        if (Math.abs(ly - chest.y) > 1.35) {
-          lx = chest.x + Math.sin(openerYaw) * 0.75;
-          lz = chest.z + Math.cos(openerYaw) * 0.75;
-          ly = chest.y;
-        }
-      }
+  private openLootChest(chest: LootChestEntity, opener: Combatant): void {
+    if (chest.opened) return;
+    if (this.mpActive) {
+      if (!opener.isPlayer && !(this.isMpHost && !opener.isRemoteHuman)) return;
+      if (this.mpPendingChestOpens.has(chest.id)) return;
+      this.mpPendingChestOpens.add(chest.id);
+      const loot = this.computeChestEjectedLoot(chest, opener);
+      this.mpClient?.send({
+        type: 'chest_open',
+        chestId: chest.id,
+        ...(opener.isPlayer ? {} : { openerId: opener.id }),
+        loot,
+      });
+      return;
+    }
 
-      this.spawnLootDrop(lx, ly, lz, item.kind, item.id, item.rarity, item.count, ejectOrigin);
-    });
+    const drops = this.computeChestEjectedLoot(chest, opener);
+    this.applyOpenedLootChest(chest, opener.isPlayer, drops);
   }
 
   // =========================================================================
@@ -1529,6 +2041,9 @@ export class WorkspaceRoyaleEngine {
     this.updateActiveZones(dt);
     this.updatePendingSlidesBeams(dt);
     this.updateCombatants(dt);
+    if (this.mpActive) {
+      this.updateMultiplayerSync(dt);
+    }
     this.updateWorldGBikes(dt);
     this.updateProjectiles(dt);
     this.updateLootChests(dt);
@@ -1538,7 +2053,7 @@ export class WorkspaceRoyaleEngine {
     this.updateCamera(dt);
 
     if (this.world) {
-      const focus = this.player ? this.player.pos : this.camController.camera.position;
+      const focus = this.getCameraFocusPos();
       this.world.updatePerformanceFocus(focus.x, focus.y, focus.z);
     }
 
@@ -1640,10 +2155,11 @@ export class WorkspaceRoyaleEngine {
           this.stormMode = 'wait';
           this.stormPhaseTimer = nextDef.waitDuration * mode.stormPaceMult;
 
-          // Drift next safe zone subtly within current circle
+          // Drift next safe zone subtly within current circle (deterministic in MP via mpRng)
+          const rngFn = this.mpActive && this.mpRng ? this.mpRng : Math.random;
           const maxShift = Math.max(0, this.stormRadius - nextDef.targetRadius) * 0.45;
-          const ang = Math.random() * Math.PI * 2;
-          const shift = Math.random() * maxShift;
+          const ang = rngFn() * Math.PI * 2;
+          const shift = rngFn() * maxShift;
           this.nextStormCenterX = THREE.MathUtils.clamp(
             this.stormCenterX + Math.cos(ang) * shift,
             GAME_CONSTANTS.ARENA_MIN_X + 24,
@@ -1680,13 +2196,14 @@ export class WorkspaceRoyaleEngine {
     let sx: number;
     let sz: number;
     let landmark: string;
+    const rngFn = this.mpActive && this.mpRng ? this.mpRng : Math.random;
     if (candidates.length > 0) {
-      const picked = candidates[Math.floor(Math.random() * candidates.length)];
+      const picked = candidates[Math.floor(rngFn() * candidates.length)];
       sx = picked.x;
       sz = picked.z;
       landmark = picked.landmark;
     } else {
-      const a = Math.random() * Math.PI * 2;
+      const a = rngFn() * Math.PI * 2;
       const r = Math.min(48, Math.max(8, this.nextStormRadius * 0.45));
       sx = THREE.MathUtils.clamp(
         this.nextStormCenterX + Math.cos(a) * r,
@@ -1768,11 +2285,47 @@ export class WorkspaceRoyaleEngine {
     }
   }
 
-  private openSupplyDrop(drop: SupplyDropEntity, opener: Combatant): void {
+  private computeSupplyDropLoot(drop: SupplyDropEntity): SyncedGroundLoot[] {
+    const weaponId = rollSupplyDropWeapon(this.activeGameMode);
+    const healId: UtilityItemId = Math.random() < 0.55 ? 'shield_jug' : 'medkit';
+
+    const dropItems: { kind: 'weapon' | 'item'; id: WeaponId | UtilityItemId; count: number }[] = [
+      { kind: 'weapon', id: weaponId, count: 1 },
+      { kind: 'item', id: healId, count: 1 },
+      { kind: 'item', id: 'mana_elixir', count: 1 },
+    ];
+
+    return dropItems.map((item, idx) => {
+      const ang = (idx / dropItems.length) * Math.PI * 2 + Math.random() * 0.5;
+      const lx = drop.x + Math.cos(ang) * 2.1;
+      const lz = drop.z + Math.sin(ang) * 2.1;
+      const ly = this.physics.getSupportHeight(lx, lz, drop.y + 1.5, 0.3, 0.5);
+      return {
+        id: `${drop.id}_item_${idx}`,
+        kind: item.kind,
+        itemId: item.id,
+        rarity: 'epic',
+        count: item.count,
+        x: Number(lx.toFixed(2)),
+        y: Number(ly.toFixed(2)),
+        z: Number(lz.toFixed(2)),
+      };
+    });
+  }
+
+  private applyOpenedSupplyDrop(
+    drop: SupplyDropEntity,
+    openerIsLocalPlayer: boolean,
+    syncedLoot: SyncedGroundLoot[]
+  ): void {
     if (drop.opened) return;
     drop.opened = true;
+    for (const c of this.combatants) {
+      if (c.channel?.kind === 'supply_drop' && c.channel.supplyDropId === drop.id) {
+        this.cancelChannel(c);
+      }
+    }
     this.scene.remove(drop.beacon);
-    // Open crate lid visual slightly / shrink crate gracefully
     const lid = drop.root.getObjectByName('CrateUpperLid');
     if (lid) {
       lid.position.y += 0.25;
@@ -1783,32 +2336,48 @@ export class WorkspaceRoyaleEngine {
     this.vfx.spawnExplosion(burstPos, 4.5, 0xfbbf24);
     this.audio.playSupplyDropOpen();
 
-    // Guaranteed Epic Loot Burst (§3.4): 1 Epic Weapon (mode-aware) + 1 Epic Shield Jug/Medkit + 1 Epic Mana Elixir
-    const mode = GAME_MODES[this.activeGameMode] ?? GAME_MODES.battle_royale;
-    const weaponId = rollSupplyDropWeapon(this.activeGameMode);
-    const healId: UtilityItemId = Math.random() < 0.55 ? 'shield_jug' : 'medkit';
+    for (const item of syncedLoot) {
+      this.spawnLootDrop(
+        item.x,
+        item.y,
+        item.z,
+        item.kind,
+        item.itemId as WeaponId | UtilityItemId,
+        item.rarity,
+        item.count ?? 1,
+        undefined,
+        item.id
+      );
+    }
 
-    const dropItems: { kind: 'weapon' | 'item'; id: WeaponId | UtilityItemId; count: number }[] = [
-      { kind: 'weapon', id: weaponId, count: 1 },
-      { kind: 'item', id: healId, count: 1 },
-      { kind: 'item', id: 'mana_elixir', count: 1 },
-    ];
-
-    dropItems.forEach((item, idx) => {
-      const ang = (idx / dropItems.length) * Math.PI * 2 + Math.random() * 0.5;
-      const lx = drop.x + Math.cos(ang) * 2.1;
-      const lz = drop.z + Math.sin(ang) * 2.1;
-      const ly = this.physics.getSupportHeight(lx, lz, drop.y + 1.5, 0.3, 0.5);
-      this.spawnLootDrop(lx, ly, lz, item.kind, item.id, 'epic', item.count);
-    });
-
-    if (opener.isPlayer) {
+    if (openerIsLocalPlayer) {
+      const mode = GAME_MODES[this.activeGameMode] ?? GAME_MODES.battle_royale;
       const weaponLabel = mode.forceWeaponId ? WEAPONS[mode.forceWeaponId].name : 'Weapon';
       this.callbacks.onAnnouncement(
         'SUPPLY DROP OPENED',
         `Epic ${weaponLabel} + Epic Shield/Medkit + Epic Mana Elixir!`
       );
     }
+  }
+
+  private openSupplyDrop(drop: SupplyDropEntity, opener: Combatant): void {
+    if (drop.opened) return;
+    if (this.mpActive) {
+      if (!opener.isPlayer && !(this.isMpHost && !opener.isRemoteHuman)) return;
+      if (this.mpPendingDropOpens.has(drop.id)) return;
+      this.mpPendingDropOpens.add(drop.id);
+      const loot = this.computeSupplyDropLoot(drop);
+      this.mpClient?.send({
+        type: 'supply_drop_open',
+        dropId: drop.id,
+        ...(opener.isPlayer ? {} : { openerId: opener.id }),
+        loot,
+      });
+      return;
+    }
+
+    const loot = this.computeSupplyDropLoot(drop);
+    this.applyOpenedSupplyDrop(drop, opener.isPlayer, loot);
   }
 
   // =========================================================================
@@ -1823,7 +2392,8 @@ export class WorkspaceRoyaleEngine {
     // Staggered 10 Hz Bot AI thinking: only rebuild BotWorldContext snapshots when >=1 bot thinks this frame!
     let anyBotNeedsThink = false;
     for (const c of this.combatants) {
-      if (!c.alive || c.isPlayer || !c.brain || c.rewind.active) continue;
+      if (!c.alive || c.isPlayer || c.isRemoteHuman || !c.brain || c.rewind.active) continue;
+      if (this.mpActive && !this.isMpHost) continue;
       c.aiThinkTimer -= dt;
       c.aiThinkAccumDt += dt;
       if (!c.cachedDecision || c.aiThinkTimer <= 0) {
@@ -1888,7 +2458,7 @@ export class WorkspaceRoyaleEngine {
             fireRateMult = Math.max(fireRateMult, 1.45);
             c.hastedSec = Math.max(c.hastedSec, rem);
             inOwnChrono = true;
-          } else {
+          } else if (!this.isFriendlyId(c, cz.ownerId)) {
             chronoSpeedMult = Math.min(chronoSpeedMult, 0.35);
             fireRateMult = Math.min(fireRateMult, 0.45);
             c.slowedSec = Math.max(c.slowedSec, rem);
@@ -1901,38 +2471,41 @@ export class WorkspaceRoyaleEngine {
       if (!inEnemyChrono && c.slowedSec > 0.15) c.slowedSec = 0.15;
 
       // Google Drive Guardrail Dome perimeter enforcement for unauthorized enemies
-      for (const gz of this.guardrailZones) {
-        if (c.id === gz.ownerId || c.skyDropping) continue;
-        const dx = c.pos.x - gz.center.x;
-        const dz = c.pos.z - gz.center.z;
-        const dist = Math.hypot(dx, dz);
-        if (dist < gz.radius && dist > 0.01) {
-          const push = (gz.radius - dist) + 0.25;
-          const step = Math.min(push, 18 * dt);
-          const ox = (dx / dist) * step;
-          const oz = (dz / dist) * step;
-          c.pos.x += ox;
-          c.pos.z += oz;
-          if (c.ridingGBikeId) {
-            const bike = this.worldGBikes.find((b) => b.id === c.ridingGBikeId);
-            if (bike) {
-              bike.x += ox;
-              bike.z += oz;
-              bike.speed *= 0.82;
+      const isRemoteSimulated = c.isRemoteHuman || (this.mpActive && !this.isMpHost && !c.isPlayer);
+      if (!isRemoteSimulated) {
+        for (const gz of this.guardrailZones) {
+          if (c.id === gz.ownerId || this.isFriendlyId(c, gz.ownerId) || c.skyDropping) continue;
+          const dx = c.pos.x - gz.center.x;
+          const dz = c.pos.z - gz.center.z;
+          const dist = Math.hypot(dx, dz);
+          if (dist < gz.radius && dist > 0.01) {
+            const push = (gz.radius - dist) + 0.25;
+            const step = Math.min(push, 18 * dt);
+            const ox = (dx / dist) * step;
+            const oz = (dz / dist) * step;
+            c.pos.x += ox;
+            c.pos.z += oz;
+            if (c.ridingGBikeId) {
+              const bike = this.worldGBikes.find((b) => b.id === c.ridingGBikeId);
+              if (bike) {
+                bike.x += ox;
+                bike.z += oz;
+                bike.speed *= 0.82;
+              }
             }
           }
         }
       }
 
       // Google Docs Version History Rewind Interpolation (0.45s smooth rollback!)
-      if (c.rewind.active) {
+      if (c.rewind.active && !isRemoteSimulated) {
         this.updateDocsRewind(c, dt);
         this.syncCombatantVisuals(c, dt);
         continue;
       }
 
       // Record 4.0s Version History ring buffer (40 samples @ 0.1s intervals)
-      if (!c.skyDropping) {
+      if (!c.skyDropping && !isRemoteSimulated) {
         c.historySampleTimer += dt;
         if (c.historySampleTimer >= 0.1) {
           c.historySampleTimer -= 0.1;
@@ -1949,7 +2522,7 @@ export class WorkspaceRoyaleEngine {
       }
 
       // Reload timer progression
-      if (c.isReloading) {
+      if (c.isReloading && !isRemoteSimulated) {
         c.reloadTimer -= dt;
         if (c.reloadTimer <= 0) {
           c.isReloading = false;
@@ -1966,7 +2539,7 @@ export class WorkspaceRoyaleEngine {
       }
 
       // Active channel progression (consumables + Supply Drop opening)
-      if (c.channel) {
+      if (c.channel && !isRemoteSimulated) {
         if (c.silencedSec > 0) {
           this.cancelChannel(c, c.isPlayer ? 'Channel interrupted (Access Revoked!)' : undefined);
         } else {
@@ -1977,15 +2550,18 @@ export class WorkspaceRoyaleEngine {
         }
       }
 
-      // Drive input (Player vs Multi-Tier Bot Brain)
+      // Drive input (Local Player vs Remote Network Interpolation vs Multi-Tier Bot Brain)
       if (c.isPlayer) {
         this.updatePlayerController(c, dt, speedMult, fireRateMult);
+      } else if (isRemoteSimulated) {
+        this.updateRemoteInterpolatedCombatant(c, dt);
       } else {
         this.updateBotController(c, dt, speedMult, fireRateMult, botWorld, botSnapMap);
       }
 
       // Storm out-of-zone damage (bypasses Shield directly into Health; disabled in Free Roam)
-      if (mode.stormEnabled && !c.skyDropping) {
+      const ownsStormTick = !this.mpActive || c.isPlayer || (this.isMpHost && !c.isRemoteHuman);
+      if (mode.stormEnabled && !c.skyDropping && ownsStormTick) {
         const distFromStorm = Math.hypot(c.pos.x - this.stormCenterX, c.pos.z - this.stormCenterZ);
         if (distFromStorm > this.stormRadius) {
           c.stormTickAccum += dt;
@@ -2012,7 +2588,7 @@ export class WorkspaceRoyaleEngine {
       if (d <= cz.radius) {
         if (c.id === cz.ownerId) {
           chronoSpeedMult = Math.max(chronoSpeedMult, 1.4);
-        } else {
+        } else if (!this.isFriendlyId(c, cz.ownerId)) {
           chronoSpeedMult = Math.min(chronoSpeedMult, 0.35);
         }
       }
@@ -2144,7 +2720,7 @@ export class WorkspaceRoyaleEngine {
     return true;
   }
 
-  private dismountGBike(c: Combatant, allowBailSlide = true): void {
+  private dismountGBike(c: Combatant, allowBailSlide = true, broadcastRelease = true): void {
     if (!c.ridingGBikeId) return;
     const bike = this.worldGBikes.find((b) => b.id === c.ridingGBikeId) ?? null;
     c.ridingGBikeId = null;
@@ -2227,12 +2803,34 @@ export class WorkspaceRoyaleEngine {
       this.startSlideFromVelocity(c, slideDirX, slideDirZ, launchSpeed, false);
       // Let unoccupied GBike coast forward ~1.2s smoothly before settling on kickstand
       bike.speed = bikeSpeed * 0.88;
+      if (this.mpActive && broadcastRelease && c.isPlayer) {
+        this.mpClient?.send({
+          type: 'bike_release',
+          bikeId: bike.id,
+          x: Number(bike.x.toFixed(2)),
+          y: Number(bike.y.toFixed(2)),
+          z: Number(bike.z.toFixed(2)),
+          yaw: Number(bike.yaw.toFixed(3)),
+          speed: Number(bike.speed.toFixed(2)),
+        });
+      }
       return;
     }
 
     // Standard low-speed / elimination / rewind dismount
     c.vel.set(fx * bikeSpeed * 0.35, Math.max(0, bike.velY * 0.5), fz * bikeSpeed * 0.35);
     bike.speed = bikeSpeed * 0.72;
+    if (this.mpActive && broadcastRelease && c.isPlayer) {
+      this.mpClient?.send({
+        type: 'bike_release',
+        bikeId: bike.id,
+        x: Number(bike.x.toFixed(2)),
+        y: Number(bike.y.toFixed(2)),
+        z: Number(bike.z.toFixed(2)),
+        yaw: Number(bike.yaw.toFixed(3)),
+        speed: Number(bike.speed.toFixed(2)),
+      });
+    }
   }
 
   private updatePlayerOnGBike(p: Combatant, bike: WorldGBike, dt: number, speedMult: number): void {
@@ -2387,6 +2985,15 @@ export class WorkspaceRoyaleEngine {
     const fz = -Math.cos(bike.yaw);
     this.audio.playGBikeBell(0, 0);
     this.pushSoundEvent('gbike', bike.x + fx * 0.65, bike.z + fz * 0.65, 55, 0.55, 0.9);
+    if (this.mpActive && p.isPlayer) {
+      this.mpClient?.send({
+        type: 'bike_bell',
+        bikeId: bike.id,
+        x: Number(bike.x.toFixed(2)),
+        y: Number(bike.y.toFixed(2)),
+        z: Number(bike.z.toFixed(2)),
+      });
+    }
     return true;
   }
 
@@ -2896,7 +3503,17 @@ export class WorkspaceRoyaleEngine {
       if (selfSnap) {
         // Advance BotBrain internal timers using real accumulated dt since this bot's last 10 Hz think
         worldCtx.dt = Math.min(0.25, Math.max(dt, b.aiThinkAccumDt));
-        b.cachedDecision = b.brain.update(selfSnap, worldCtx);
+        // In Teams mode, filter teammates out of BotWorldContext so bots NEVER target or fire at allies!
+        const effectiveWorld: BotWorldContext =
+          this.mpActive && this.mpFormat === 'teams' && b.teamId !== null
+            ? {
+                ...worldCtx,
+                combatants: worldCtx.combatants.filter(
+                  (s) => s.id === b.id || !this.isFriendlyId(b, s.id)
+                ),
+              }
+            : worldCtx;
+        b.cachedDecision = b.brain.update(selfSnap, effectiveWorld);
         b.aiThinkTimer = 0.1;
         b.aiThinkAccumDt = 0;
       }
@@ -3400,13 +4017,31 @@ export class WorkspaceRoyaleEngine {
       weaponId === 'breaker_12g' || weaponId === 'longbow_308' ? 1.4 : 0.95
     );
 
-    const distToPlayer = this.player ? shooter.pos.distanceTo(this.player.pos) : 0;
+    if (this.mpActive && (shooter.isPlayer || (this.isMpHost && !shooter.isRemoteHuman))) {
+      this.mpClient?.send({
+        type: 'fire_fx',
+        event: {
+          shooterId: shooter.id,
+          weaponId,
+          ox: Number(muzzlePos.x.toFixed(2)),
+          oy: Number(muzzlePos.y.toFixed(2)),
+          oz: Number(muzzlePos.z.toFixed(2)),
+          endX: Number(aimPoint.x.toFixed(2)),
+          endY: Number(aimPoint.y.toFixed(2)),
+          endZ: Number(aimPoint.z.toFixed(2)),
+          isExplosive: false,
+        },
+      });
+    }
+
+    const listenerPos = this.getCameraFocusPos();
+    const distToPlayer = shooter.pos.distanceTo(listenerPos);
     this.audio.playShot(
       weaponId,
       shooter.isPlayer ? 0 : distToPlayer,
       shooter.isPlayer ? 0 : this.computeSpatialPan(shooter.pos)
     );
-    if (!shooter.isPlayer) {
+    if (!shooter.isPlayer && !this.isFriendly(this.player, shooter)) {
       this.pushSoundEvent(
         'gunfire',
         shooter.pos.x,
@@ -3454,7 +4089,7 @@ export class WorkspaceRoyaleEngine {
     // Also test living enemy hitboxes along center crosshair ray so close-range parallax is zero!
     const segEnd = rayOrigin.clone().addScaledVector(rayDir, bestDist);
     for (const c of this.combatants) {
-      if (!c.alive || c.isPlayer || c.skyDropping) continue;
+      if (!c.alive || c.isPlayer || c.skyDropping || this.isFriendly(this.player, c)) continue;
       const hit = this.physics.testCombatantHitbox(rayOrigin, segEnd, c.pos, c.crouching);
       if (hit.hit) {
         const d = hit.t * bestDist;
@@ -3529,9 +4164,10 @@ export class WorkspaceRoyaleEngine {
       }
 
       // 1. Check Google Drive Access Revoked Guardrail Dome interception!
+      const projOwner = this.combatants.find((c) => c.id === p.ownerId) ?? null;
       let interceptedByDrive = false;
       for (const gz of this.guardrailZones) {
-        if (p.ownerId === gz.ownerId) continue;
+        if (p.ownerId === gz.ownerId || this.isFriendlyId(projOwner, gz.ownerId)) continue;
         const prevDist = p.prevPos.distanceTo(gz.center);
         const currDist = p.pos.distanceTo(gz.center);
         // Intercept any enemy projectile crossing from outside to inside (or traveling inside boundary)
@@ -3567,6 +4203,7 @@ export class WorkspaceRoyaleEngine {
 
       for (const target of this.combatants) {
         if (!target.alive || target.id === p.ownerId || target.rewind.active) continue;
+        if (this.isFriendly(projOwner, target)) continue;
         const res = this.physics.testCombatantHitbox(p.prevPos, p.pos, target.pos, target.crouching);
         if (res.hit && res.t <= maxT) {
           maxT = res.t;
@@ -3593,10 +4230,9 @@ export class WorkspaceRoyaleEngine {
       if (hitTarget) {
         if (p.splashRadius > 0) {
           this.detonateSplash(hitPoint, p);
-        } else {
+        } else if (!p.visualOnly) {
           const finalDmg = Math.round(p.damage * (hitHeadshot ? p.headshotMult : 1.0));
-          const attacker = this.combatants.find((c) => c.id === p.ownerId) ?? null;
-          this.applyCombatDamage(hitTarget, attacker, finalDmg, {
+          this.applyCombatDamage(hitTarget, projOwner, finalDmg, {
             headshot: hitHeadshot,
             weaponName: p.weaponName,
             isUltimate: p.isUltimate,
@@ -3610,7 +4246,7 @@ export class WorkspaceRoyaleEngine {
           this.detonateSplash(worldHit.point, p);
         } else {
           this.vfx.spawnHitImpact(worldHit.point, { isWorld: true });
-          if (worldHit.destructible && worldHit.colliderId) {
+          if (!p.visualOnly && worldHit.destructible && worldHit.colliderId) {
             this.damageHardLightBarrier(worldHit.colliderId, p.damage * p.coverDamageMult, worldHit.point);
           }
         }
@@ -3624,22 +4260,50 @@ export class WorkspaceRoyaleEngine {
     const color = proj.kind === 'envelope' ? 0xea4335 : 0xc084fc;
     this.vfx.spawnExplosion(center, proj.splashRadius, color);
 
-    const distToPlayer = this.player ? center.distanceTo(this.player.pos) : 0;
+    const listenerPos = this.getCameraFocusPos();
+    const distToPlayer = center.distanceTo(listenerPos);
     this.audio.playExplosion(distToPlayer, this.computeSpatialPan(center));
-    if (proj.ownerId !== this.player?.id) {
+    const attacker = this.combatants.find((c) => c.id === proj.ownerId) ?? null;
+    if (proj.ownerId !== this.player?.id && !this.isFriendly(this.player, attacker)) {
       this.pushSoundEvent('gunfire', center.x, center.z, 105, 0.85, 1.0);
     }
-    if (this.player && distToPlayer < 24) {
+    if (this.player && this.player.alive && distToPlayer < 24) {
       this.camController.addShake(Math.max(0.05, (1 - distToPlayer / 24) * 0.28));
     }
 
-    const attacker = this.combatants.find((c) => c.id === proj.ownerId) ?? null;
+    if (proj.visualOnly) return;
+
+    // Broadcast grenade explosion VFX to remote peers in MP
+    if (
+      this.mpActive &&
+      proj.kind === 'grenade' &&
+      proj.weaponId &&
+      attacker &&
+      (attacker.isPlayer || (this.isMpHost && !attacker.isRemoteHuman))
+    ) {
+      this.mpClient?.send({
+        type: 'fire_fx',
+        event: {
+          shooterId: attacker.id,
+          weaponId: proj.weaponId,
+          ox: Number(center.x.toFixed(2)),
+          oy: Number(center.y.toFixed(2)),
+          oz: Number(center.z.toFixed(2)),
+          endX: Number(center.x.toFixed(2)),
+          endY: Number(center.y.toFixed(2)),
+          endZ: Number(center.z.toFixed(2)),
+          isExplosive: true,
+          explosionRadius: proj.splashRadius,
+        },
+      });
+    }
 
     // Damage combatants inside blast radius with smooth radial falloff
     for (const target of this.combatants) {
       if (!target.alive || target.rewind.active) continue;
       // Avoid self-damage on Gmail Ultimate; allow reduced self-splash on Nova GL-40
       if (target.id === proj.ownerId && proj.kind === 'envelope') continue;
+      if (this.isFriendly(attacker, target)) continue;
       const bodyCenter = this.tmpVecA.set(target.pos.x, target.pos.y + 0.95, target.pos.z);
       const dist = bodyCenter.distanceTo(center);
       if (dist <= proj.splashRadius) {
@@ -3680,6 +4344,30 @@ export class WorkspaceRoyaleEngine {
     }
   ): void {
     if (!victim.alive || amount <= 0) return;
+    if (this.isFriendly(attacker, victim)) return;
+
+    // Server-authoritative combat routing in Multiplayer
+    if (this.mpActive) {
+      const authorized =
+        Boolean(attacker?.isPlayer) ||
+        (attacker === null && victim.isPlayer) ||
+        Boolean(this.isMpHost && attacker && !attacker.isRemoteHuman && !attacker.isPlayer);
+      if (!authorized) return;
+
+      this.mpClient?.send({
+        type: 'hit_report',
+        targetId: victim.id,
+        ...(attacker && !attacker.isPlayer ? { attackerId: attacker.id } : {}),
+        amount: Math.round(amount),
+        headshot: meta.headshot,
+        weaponName: meta.weaponName,
+        isUltimate: meta.isUltimate,
+        hitX: Number(meta.hitPoint.x.toFixed(2)),
+        hitY: Number(meta.hitPoint.y.toFixed(2)),
+        hitZ: Number(meta.hitPoint.z.toFixed(2)),
+      });
+      return;
+    }
 
     const hadShield = victim.shield > 0;
     const shieldAbsorbed = Math.min(victim.shield, amount);
@@ -3757,6 +4445,14 @@ export class WorkspaceRoyaleEngine {
 
   private applyStormDamage(victim: Combatant, dps: number): void {
     if (!victim.alive) return;
+    if (this.mpActive) {
+      if (victim.isPlayer) {
+        this.mpClient?.send({ type: 'storm_damage', amount: Math.round(dps) });
+      } else if (this.isMpHost && !victim.isRemoteHuman) {
+        this.mpClient?.send({ type: 'storm_damage', targetId: victim.id, amount: Math.round(dps) });
+      }
+      return;
+    }
     victim.health = Math.max(0, victim.health - dps);
     if (victim.isPlayer) {
       this.audio.playStormTick();
@@ -3946,6 +4642,45 @@ export class WorkspaceRoyaleEngine {
       this.callbacks.onAnnouncement(ult.name.toUpperCase(), ult.subtitle);
     }
 
+    // Broadcast Ultimate cast to all peers in Multiplayer (including Slides aim target)
+    if (this.mpActive && (caster.isPlayer || (this.isMpHost && !caster.isRemoteHuman))) {
+      let targetX: number | undefined;
+      let targetY: number | undefined;
+      let targetZ: number | undefined;
+      if (caster.heroId === 'slides') {
+        const aimPt = new THREE.Vector3();
+        if (caster.isPlayer) {
+          this.resolvePlayerAimPoint(85, aimPt);
+        } else if (botAimPoint) {
+          aimPt.copy(botAimPoint);
+        } else {
+          aimPt.set(
+            caster.pos.x - Math.sin(caster.yaw) * 85,
+            caster.pos.y + 1.4,
+            caster.pos.z - Math.cos(caster.yaw) * 85
+          );
+        }
+        targetX = Number(aimPt.x.toFixed(2));
+        targetY = Number(aimPt.y.toFixed(2));
+        targetZ = Number(aimPt.z.toFixed(2));
+      }
+      this.mpClient?.send({
+        type: 'ult_cast',
+        event: {
+          casterId: caster.id,
+          heroId: caster.heroId,
+          x: Number(caster.pos.x.toFixed(2)),
+          y: Number(caster.pos.y.toFixed(2)),
+          z: Number(caster.pos.z.toFixed(2)),
+          yaw: Number(caster.yaw.toFixed(3)),
+          pitch: Number(caster.pitch.toFixed(3)),
+          targetX,
+          targetY,
+          targetZ,
+        },
+      });
+    }
+
     switch (caster.heroId) {
       case 'gmail':
         this.castGmailReplyAll(caster);
@@ -3969,9 +4704,9 @@ export class WorkspaceRoyaleEngine {
   }
 
   /** 1. GMAIL — Reply-All Barrage: 6 homing explosive envelopes targeting up to 3 nearest enemies (34 splash, 5m). */
-  private castGmailReplyAll(caster: Combatant): void {
+  private castGmailReplyAll(caster: Combatant, visualOnly = false): void {
     const enemies = this.combatants
-      .filter((c) => c.alive && !c.skyDropping && c.id !== caster.id)
+      .filter((c) => c.alive && !c.skyDropping && c.id !== caster.id && !this.isFriendly(caster, c))
       .map((c) => ({ c, dist: c.pos.distanceTo(caster.pos) }))
       .filter((e) => e.dist <= 95)
       .sort((a, b) => a.dist - b.dist)
@@ -4011,6 +4746,7 @@ export class WorkspaceRoyaleEngine {
         color: 0xea4335,
         targetId: assignedTarget?.id,
         mesh,
+        visualOnly,
       });
     }
   }
@@ -4021,17 +4757,28 @@ export class WorkspaceRoyaleEngine {
    * - Revokes enemies within 16m: 22 dmg, knockback outward, 3.0s Silence (blocks Ults & cancels channels!)
    * - Grants +40 Shield to caster!
    */
-  private castDriveAccessRevoked(caster: Combatant): void {
-    const prevShield = caster.shield;
-    caster.shield = Math.min(GAME_CONSTANTS.MAX_SHIELD, caster.shield + 40);
-    const gained = Math.round(caster.shield - prevShield);
-    this.vfx.spawnStatusBurst(caster.pos, 0x34a853);
-    if (caster.isPlayer && gained > 0) {
-      const scr = this.projectWorldToScreen(caster.pos.clone().add(new THREE.Vector3(0, 1.8, 0)));
-      if (scr) {
-        this.callbacks.onFloatingDamage({ screenX: scr.x, screenY: scr.y, amount: gained, kind: 'heal' });
+  private castDriveAccessRevoked(caster: Combatant, visualOnly = false): void {
+    if (!visualOnly) {
+      const prevShield = caster.shield;
+      caster.shield = Math.min(GAME_CONSTANTS.MAX_SHIELD, caster.shield + 40);
+      const gained = Math.round(caster.shield - prevShield);
+      if (caster.isPlayer && gained > 0) {
+        const scr = this.projectWorldToScreen(caster.pos.clone().add(new THREE.Vector3(0, 1.8, 0)));
+        if (scr) {
+          this.callbacks.onFloatingDamage({ screenX: scr.x, screenY: scr.y, amount: gained, kind: 'heal' });
+        }
+      }
+      if (this.mpActive && (caster.isPlayer || (this.isMpHost && !caster.isRemoteHuman))) {
+        this.mpClient?.send({
+          type: 'vitals_sync',
+          ...(caster.isPlayer ? {} : { combatantId: caster.id }),
+          health: Math.round(caster.health),
+          shield: Math.round(caster.shield),
+          mana: Math.round(caster.mana),
+        });
       }
     }
+    this.vfx.spawnStatusBurst(caster.pos, 0x34a853);
 
     const center = caster.pos.clone();
     const visual = this.vfx.createDriveGuardrailDome(center, 12.0);
@@ -4046,7 +4793,7 @@ export class WorkspaceRoyaleEngine {
 
     // Revoke sharing permissions within 16m
     for (const enemy of this.combatants) {
-      if (!enemy.alive || enemy.skyDropping || enemy.id === caster.id) continue;
+      if (!enemy.alive || enemy.skyDropping || enemy.id === caster.id || this.isFriendly(caster, enemy)) continue;
       const dx = enemy.pos.x - center.x;
       const dz = enemy.pos.z - center.z;
       const dist = Math.hypot(dx, dz);
@@ -4062,12 +4809,14 @@ export class WorkspaceRoyaleEngine {
         enemy.vel.y = Math.max(enemy.vel.y, 4.8);
         enemy.grounded = false;
 
-        this.applyCombatDamage(enemy, caster, 22, {
-          headshot: false,
-          weaponName: 'Access Revoked',
-          isUltimate: true,
-          hitPoint: new THREE.Vector3(enemy.pos.x, enemy.pos.y + 1.1, enemy.pos.z),
-        });
+        if (!visualOnly) {
+          this.applyCombatDamage(enemy, caster, 22, {
+            headshot: false,
+            weaponName: 'Access Revoked',
+            isUltimate: true,
+            hitPoint: new THREE.Vector3(enemy.pos.x, enemy.pos.y + 1.1, enemy.pos.z),
+          });
+        }
 
         if (enemy.isPlayer) {
           this.audio.playSilenced();
@@ -4092,23 +4841,29 @@ export class WorkspaceRoyaleEngine {
   }
 
   /** 4. GOOGLE CHAT — @all Ping Overload: 28m shockwave (45 dmg, -35 Mana, reveals ALL living enemies for 8s!). */
-  private castChatPingOverload(caster: Combatant): void {
+  private castChatPingOverload(caster: Combatant, visualOnly = false): void {
     const center = caster.pos.clone();
     this.vfx.spawnChatPingWave(center, 28.0);
     caster.revealedAllSec = 8.0;
+    // In Teams mode, teammates of a Chat caster also share the 8s recon reveal!
+    if (this.mpActive && this.mpFormat === 'teams' && this.player && this.isFriendly(caster, this.player)) {
+      this.player.revealedAllSec = Math.max(this.player.revealedAllSec, 8.0);
+    }
 
     for (const enemy of this.combatants) {
-      if (!enemy.alive || enemy.id === caster.id) continue;
+      if (!enemy.alive || enemy.id === caster.id || this.isFriendly(caster, enemy)) continue;
       enemy.revealedSec = Math.max(enemy.revealedSec, 8.0);
       const dist = enemy.pos.distanceTo(center);
       if (dist <= 28.0 && !enemy.skyDropping) {
         enemy.mana = Math.max(0, enemy.mana - 35);
-        this.applyCombatDamage(enemy, caster, 45, {
-          headshot: false,
-          weaponName: '@all Ping Overload',
-          isUltimate: true,
-          hitPoint: new THREE.Vector3(enemy.pos.x, enemy.pos.y + 1.15, enemy.pos.z),
-        });
+        if (!visualOnly) {
+          this.applyCombatDamage(enemy, caster, 45, {
+            headshot: false,
+            weaponName: '@all Ping Overload',
+            isUltimate: true,
+            hitPoint: new THREE.Vector3(enemy.pos.x, enemy.pos.y + 1.15, enemy.pos.z),
+          });
+        }
       }
     }
   }
@@ -4175,20 +4930,30 @@ export class WorkspaceRoyaleEngine {
       const segLine = new THREE.Line3(origin, segEnd);
       const closest = new THREE.Vector3();
 
-      for (const enemy of this.combatants) {
-        if (!enemy.alive || enemy.skyDropping || enemy.id === caster.id || enemy.rewind.active) continue;
-        const bodyCenter = new THREE.Vector3(enemy.pos.x, enemy.pos.y + 1.0, enemy.pos.z);
-        segLine.closestPointToPoint(bodyCenter, true, closest);
-        if (closest.distanceTo(bodyCenter) <= beamHalfWidth + 0.5) {
-          enemy.vel.addScaledVector(dir, 18.5);
-          enemy.vel.y = Math.max(enemy.vel.y, 6.2);
-          enemy.grounded = false;
-          this.applyCombatDamage(enemy, caster, 85, {
-            headshot: false,
-            weaponName: 'Executive Spotlight',
-            isUltimate: true,
-            hitPoint: bodyCenter,
-          });
+      if (!pb.visualOnly) {
+        for (const enemy of this.combatants) {
+          if (
+            !enemy.alive ||
+            enemy.skyDropping ||
+            enemy.id === caster.id ||
+            enemy.rewind.active ||
+            this.isFriendly(caster, enemy)
+          ) {
+            continue;
+          }
+          const bodyCenter = new THREE.Vector3(enemy.pos.x, enemy.pos.y + 1.0, enemy.pos.z);
+          segLine.closestPointToPoint(bodyCenter, true, closest);
+          if (closest.distanceTo(bodyCenter) <= beamHalfWidth + 0.5) {
+            enemy.vel.addScaledVector(dir, 18.5);
+            enemy.vel.y = Math.max(enemy.vel.y, 6.2);
+            enemy.grounded = false;
+            this.applyCombatDamage(enemy, caster, 85, {
+              headshot: false,
+              weaponName: 'Executive Spotlight',
+              isUltimate: true,
+              hitPoint: bodyCenter,
+            });
+          }
         }
       }
 
@@ -4215,7 +4980,7 @@ export class WorkspaceRoyaleEngine {
 
     // 12m Redline Pulse at departure point (35 dmg)
     for (const enemy of this.combatants) {
-      if (!enemy.alive || enemy.skyDropping || enemy.id === caster.id) continue;
+      if (!enemy.alive || enemy.skyDropping || enemy.id === caster.id || this.isFriendly(caster, enemy)) continue;
       if (enemy.pos.distanceTo(departurePos) <= 12.0) {
         this.applyCombatDamage(enemy, caster, 35, {
           headshot: false,
@@ -4305,6 +5070,16 @@ export class WorkspaceRoyaleEngine {
         },
       ];
       this.vfx.spawnStatusBurst(c.pos, 0x4285f4);
+
+      if (this.mpActive && (c.isPlayer || (this.isMpHost && !c.isRemoteHuman))) {
+        this.mpClient?.send({
+          type: 'vitals_sync',
+          ...(c.isPlayer ? {} : { combatantId: c.id }),
+          health: Math.round(c.health),
+          shield: Math.round(c.shield),
+          mana: Math.round(c.mana),
+        });
+      }
 
       if (c.isPlayer && hpGain + shGain > 0) {
         const scr = this.projectWorldToScreen(c.pos.clone().add(new THREE.Vector3(0, 1.85, 0)));
@@ -4491,6 +5266,17 @@ export class WorkspaceRoyaleEngine {
         const fxPos = ts ? new THREE.Vector3(ts.x, ts.y, ts.z) : c.pos.clone();
         this.vfx.spawnTechStopUpgrade(fxPos, ch.targetRarity);
         this.audio.playTechStopUpgrade(ch.targetRarity);
+        if (this.mpActive && c.isPlayer) {
+          this.mpClient?.send({
+            type: 'techstop_upgrade',
+            techStopId: ch.techStopId,
+            weaponId: slot.id as WeaponId,
+            newRarity: ch.targetRarity,
+            x: Number(fxPos.x.toFixed(2)),
+            y: Number(fxPos.y.toFixed(2)),
+            z: Number(fxPos.z.toFixed(2)),
+          });
+        }
         if (c.isPlayer) {
           this.callbacks.onAnnouncement(
             'TECHSTOP UPGRADE',
@@ -4517,6 +5303,16 @@ export class WorkspaceRoyaleEngine {
 
       this.consumeSlotItem(c, ch.slotIndex);
       this.vfx.spawnStatusBurst(c.pos, color);
+
+      if (this.mpActive && (c.isPlayer || (this.isMpHost && !c.isRemoteHuman))) {
+        this.mpClient?.send({
+          type: 'vitals_sync',
+          ...(c.isPlayer ? {} : { combatantId: c.id }),
+          health: Math.round(c.health),
+          shield: Math.round(c.shield),
+          mana: Math.round(c.mana),
+        });
+      }
 
       if (c.isPlayer) {
         this.audio.playChannelComplete(ch.itemId);
@@ -4935,6 +5731,23 @@ export class WorkspaceRoyaleEngine {
     }
 
     if (target.kind === 'gbike') {
+      if (this.mpActive) {
+        if (target.bike.riderId !== null) {
+          this.callbacks.onAnnouncement('GBIKE TAKEN', 'Another player is already riding this GBike');
+          return;
+        }
+        const nowMs = performance.now();
+        if (this.mpPendingBikeClaimId === target.bike.id && nowMs - this.mpPendingBikeClaimAt < 1200) {
+          return;
+        }
+        this.mpPendingBikeClaimId = target.bike.id;
+        this.mpPendingBikeClaimAt = nowMs;
+        this.mpClient?.send({
+          type: 'bike_claim',
+          bikeId: target.bike.id,
+        });
+        return;
+      }
       this.mountGBike(p, target.bike);
     }
   }
@@ -4953,6 +5766,27 @@ export class WorkspaceRoyaleEngine {
   }
 
   private pickupLoot(c: Combatant, loot: GroundLoot): void {
+    const idx = this.lootDrops.indexOf(loot);
+    if (idx < 0) return;
+
+    if (this.mpActive) {
+      if (!c.isPlayer && !(this.isMpHost && !c.isRemoteHuman)) return;
+      const nowMs = performance.now();
+      const pendingAt = this.mpPendingLootClaims.get(loot.id);
+      if (pendingAt && nowMs - pendingAt < 1500) return;
+      this.mpPendingLootClaims.set(loot.id, nowMs);
+      this.mpClient?.send({
+        type: 'loot_claim',
+        lootId: loot.id,
+        ...(c.isPlayer ? {} : { claimerId: c.id }),
+      });
+      return;
+    }
+
+    this.applyClaimedLootToCombatant(c, loot);
+  }
+
+  private applyClaimedLootToCombatant(c: Combatant, loot: GroundLoot): void {
     const idx = this.lootDrops.indexOf(loot);
     if (idx < 0) return;
 
@@ -5046,15 +5880,40 @@ export class WorkspaceRoyaleEngine {
             };
 
       if (prev) {
-        this.spawnLootDrop(
-          loot.x + (Math.random() - 0.5) * 0.7,
-          loot.y,
-          loot.z + (Math.random() - 0.5) * 0.7,
+        const dropX = Number((loot.x + (Math.random() - 0.5) * 0.7).toFixed(2));
+        const dropY = Number(loot.y.toFixed(2));
+        const dropZ = Number((loot.z + (Math.random() - 0.5) * 0.7).toFixed(2));
+        const explicitDropId = this.mpActive
+          ? `drop_${c.id}_${this.nextLootSeq++}`
+          : undefined;
+        const spawned = this.spawnLootDrop(
+          dropX,
+          dropY,
+          dropZ,
           prev.kind,
           prev.id,
           prev.rarity,
-          prev.count ?? 1
+          prev.count ?? 1,
+          undefined,
+          explicitDropId
         );
+        if (this.mpActive) {
+          this.mpClient?.send({
+            type: 'loot_spawn',
+            items: [
+              {
+                id: spawned.id,
+                kind: spawned.kind,
+                itemId: spawned.itemId,
+                rarity: spawned.rarity,
+                count: spawned.count,
+                x: dropX,
+                y: dropY,
+                z: dropZ,
+              },
+            ],
+          });
+        }
       }
       placed = true;
       placedSlotIdx = replaceIdx;
@@ -5166,22 +6025,33 @@ export class WorkspaceRoyaleEngine {
   }
 
   private updateBotOverheadAndReveal(c: Combatant, dSq: number, revealedByPlayer: boolean): void {
-    const showOverhead = c.alive && !c.skyDropping && (dSq < 56 * 56 || revealedByPlayer);
+    const isTeammate = this.isFriendly(this.player, c);
+    const isSpectatedTarget = this.spectateActive && c.id === this.spectateTargetId;
+    const maxDist = isTeammate ? 120 : c.isRemoteHuman ? 72 : 56;
+    const showOverhead =
+      c.alive && !c.skyDropping && !isSpectatedTarget && (dSq < maxDist * maxDist || revealedByPlayer);
     c.hero.overheadGroup.visible = showOverhead;
     if (showOverhead) {
       c.hero.overheadGroup.position.y = c.crouching ? 1.55 : 2.18;
-      c.hero.overheadGroup.quaternion.copy(this.camController.camera.quaternion);
+      c.hero.overheadGroup.quaternion
+        .copy(c.hero.root.quaternion)
+        .invert()
+        .multiply(this.camController.camera.quaternion);
       const hpRatio = Math.max(0.001, c.health / GAME_CONSTANTS.MAX_HEALTH);
       c.hero.hpBarFill.scale.x = hpRatio;
       c.hero.hpBarFill.position.x = -(1 - hpRatio) * 0.56;
+      const hasShield = c.shield > 0.5;
       const shRatio = Math.max(0.001, c.shield / GAME_CONSTANTS.MAX_SHIELD);
-      c.hero.shieldBarFill.visible = c.shield > 0.5;
-      c.hero.shieldBarFill.scale.x = shRatio;
-      c.hero.shieldBarFill.position.x = -(1 - shRatio) * 0.56;
+      c.hero.shieldBarBg.visible = hasShield;
+      c.hero.shieldBarFill.visible = hasShield;
+      if (hasShield) {
+        c.hero.shieldBarFill.scale.x = shRatio;
+        c.hero.shieldBarFill.position.x = -(1 - shRatio) * 0.56;
+      }
     }
 
-    // Google Chat @all Ping Overload glowing wallhack ring (depthTest: false)
-    c.hero.revealRing.visible = c.alive && revealedByPlayer;
+    // Google Chat @all Ping Overload glowing wallhack ring (depthTest: false; enemies only)
+    c.hero.revealRing.visible = c.alive && revealedByPlayer && !isTeammate;
     if (c.hero.revealRing.visible) {
       const pulse = 1.0 + Math.sin(this.matchElapsed * 7.5) * 0.16;
       c.hero.revealRing.scale.setScalar(pulse);
@@ -5653,16 +6523,19 @@ export class WorkspaceRoyaleEngine {
     let justBecameVisible = false;
     let botDistSq = 0;
 
-    // Smart Bot Distance Culling & 3-Tier Animation/Shadow LOD
+    // Smart Bot Distance Culling & 3-Tier Animation/Shadow LOD (keep teammates & remote humans crisp at range!)
     if (!c.isPlayer) {
-      const refPos = this.player ? this.player.pos : this.camController.camera.position;
+      const refPos = this.getCameraFocusPos();
       const dx = c.pos.x - refPos.x;
       const dz = c.pos.z - refPos.z;
       botDistSq = dx * dx + dz * dz;
+      const isTeammate = this.isFriendly(this.player, c);
+      const isSpectated = this.spectateActive && c.id === this.spectateTargetId;
 
       if (!c.skyDropping) {
-        const botCullDistSq = qCfg.botCullDist * qCfg.botCullDist;
-        if (botDistSq > botCullDistSq && !revealedByPlayer) {
+        const effectiveCullDist = isTeammate || c.isRemoteHuman ? Math.max(qCfg.botCullDist, 145) : qCfg.botCullDist;
+        const botCullDistSq = effectiveCullDist * effectiveCullDist;
+        if (botDistSq > botCullDistSq && !revealedByPlayer && !isSpectated) {
           if (c.hero.root.visible) c.hero.root.visible = false;
           if (c.castingShadow) {
             c.castingShadow = false;
@@ -5681,7 +6554,7 @@ export class WorkspaceRoyaleEngine {
         this.visibleBotCount++;
 
         const fullAnimDistSq = qCfg.botFullAnimDist * qCfg.botFullAnimDist;
-        if (botDistSq > fullAnimDistSq) {
+        if (botDistSq > fullAnimDistSq && !isSpectated) {
           isMidLod = true;
           if (c.castingShadow) {
             c.castingShadow = false;
@@ -6047,8 +6920,9 @@ export class WorkspaceRoyaleEngine {
   }
 
   private updateLootChests(dt: number): void {
-    const refPos = this.player ? this.player.pos : this.camController.camera.position;
-    const isSkyDropping = Boolean(this.player?.skyDropping);
+    const focusC = this.getCameraFocusCombatant();
+    const refPos = focusC ? focusC.pos : this.camController.camera.position;
+    const isSkyDropping = Boolean(focusC?.skyDropping);
     const qCfg = QUALITY_PRESETS[this.qualityPreset];
     const cullDist = isSkyDropping ? 320 : qCfg.chestCullDist;
     const cullDistSq = cullDist * cullDist;
@@ -6098,7 +6972,7 @@ export class WorkspaceRoyaleEngine {
   }
 
   private updateLootVisuals(dt: number): void {
-    const refPos = this.player ? this.player.pos : this.camController.camera.position;
+    const refPos = this.getCameraFocusPos();
     const lootCullDist = QUALITY_PRESETS[this.qualityPreset].lootCullDist;
     const lootCullDistSq = lootCullDist * lootCullDist;
 
@@ -6148,6 +7022,39 @@ export class WorkspaceRoyaleEngine {
   }
 
   private updateCamera(dt: number): void {
+    if (this.spectateActive) {
+      let target = this.spectateTargetId
+        ? this.combatants.find((c) => c.id === this.spectateTargetId && c.alive) ?? null
+        : null;
+      if (!target) {
+        target = this.pickBestSpectateTarget(null);
+      }
+      if (target) {
+        const riddenBike = target.ridingGBikeId
+          ? this.worldGBikes.find((b) => b.id === target?.ridingGBikeId) ?? null
+          : null;
+        this.camController.update({
+          dt,
+          playerPos: target.pos,
+          yaw: target.yaw,
+          pitch: target.pitch,
+          crouching: target.crouching,
+          sliding: target.sliding,
+          ridingGBike: Boolean(riddenBike),
+          gbikeLean: riddenBike ? riddenBike.leanAngle : 0,
+          sprinting: target.sprinting,
+          isAds: false,
+          sniperScope: false,
+          skyDropping: target.skyDropping,
+          dead: false,
+          raycastDist: (origin, dir, maxDist) => {
+            const hit = this.physics.raycastWorld(origin, dir, maxDist);
+            return hit ? hit.distance : maxDist;
+          },
+        });
+        return;
+      }
+    }
     if (!this.player) return;
     const riddenBike = this.player.ridingGBikeId
       ? this.worldGBikes.find((b) => b.id === this.player?.ridingGBikeId) ?? null
@@ -6178,7 +7085,7 @@ export class WorkspaceRoyaleEngine {
   // =========================================================================
 
   private computeSpatialPan(sourcePos: THREE.Vector3): number {
-    const p = this.player;
+    const p = this.getCameraFocusCombatant();
     if (!p) return 0;
     const dx = sourcePos.x - p.pos.x;
     const dz = sourcePos.z - p.pos.z;
@@ -6314,6 +7221,11 @@ export class WorkspaceRoyaleEngine {
 
   private emitHudSnapshot(): void {
     const p = this.player;
+    const focusC = this.getCameraFocusCombatant();
+    const spectateTarget =
+      this.spectateActive && this.spectateTargetId
+        ? this.combatants.find((c) => c.id === this.spectateTargetId && c.alive) ?? null
+        : null;
     const heroId: ProductHeroId = p?.heroId ?? 'gmail';
     const heroDef = HERO_MAP[heroId];
     const mode = GAME_MODES[this.activeGameMode] ?? GAME_MODES.battle_royale;
@@ -6321,8 +7233,8 @@ export class WorkspaceRoyaleEngine {
 
     const aliveCount = this.combatants.filter((c) => c.alive).length;
     const inStorm =
-      mode.stormEnabled && p
-        ? Math.hypot(p.pos.x - this.stormCenterX, p.pos.z - this.stormCenterZ) > this.stormRadius
+      mode.stormEnabled && focusC
+        ? Math.hypot(focusC.pos.x - this.stormCenterX, focusC.pos.z - this.stormCenterZ) > this.stormRadius
         : false;
 
     const groundY = p ? this.physics.getSupportHeight(p.pos.x, p.pos.z, p.pos.y, 0.42, 0.65) : 0;
@@ -6373,9 +7285,9 @@ export class WorkspaceRoyaleEngine {
     const supplyDropBearings: SupplyDropBearing[] = this.supplyDrops
       .filter((d) => !d.opened)
       .map((d) => {
-        const px = p?.pos.x ?? 0;
-        const pz = p?.pos.z ?? 0;
-        const yaw = p?.yaw ?? 0;
+        const px = focusC?.pos.x ?? 0;
+        const pz = focusC?.pos.z ?? 0;
+        const yaw = focusC?.yaw ?? 0;
         const dx = d.x - px;
         const dz = d.z - pz;
         const fx = -Math.sin(yaw);
@@ -6393,13 +7305,13 @@ export class WorkspaceRoyaleEngine {
 
     let waypointBearingRad: number | null = null;
     let waypointDist: number | null = null;
-    if (this.waypoint && p) {
-      const dx = this.waypoint.x - p.pos.x;
-      const dz = this.waypoint.z - p.pos.z;
-      const fx = -Math.sin(p.yaw);
-      const fz = -Math.cos(p.yaw);
-      const rx = Math.cos(p.yaw);
-      const rz = -Math.sin(p.yaw);
+    if (this.waypoint && focusC) {
+      const dx = this.waypoint.x - focusC.pos.x;
+      const dz = this.waypoint.z - focusC.pos.z;
+      const fx = -Math.sin(focusC.yaw);
+      const fz = -Math.cos(focusC.yaw);
+      const rx = Math.cos(focusC.yaw);
+      const rz = -Math.sin(focusC.yaw);
       waypointBearingRad = Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz);
       waypointDist = Math.round(Math.hypot(dx, dz));
     }
@@ -6452,8 +7364,8 @@ export class WorkspaceRoyaleEngine {
       stormTimer: mode.stormEnabled ? Math.max(0, Math.ceil(this.stormPhaseTimer)) : 0,
       inStorm,
       stormDps: mode.stormEnabled ? phaseDef.dps : 0,
-      zoneName: p && this.world ? this.world.getZoneName(p.pos.x, p.pos.z) : 'Googleplex Campus',
-      headingRad: p ? p.yaw : 0, // Standard Three.js yaw (0 = North -Z, turning right decreases yaw)
+      zoneName: focusC && this.world ? this.world.getZoneName(focusC.pos.x, focusC.pos.z) : 'Googleplex Campus',
+      headingRad: focusC ? focusC.yaw : 0, // Standard Three.js yaw (0 = North -Z, turning right decreases yaw)
       interactPrompt,
       channel: channelState,
       status: {
@@ -6471,23 +7383,60 @@ export class WorkspaceRoyaleEngine {
         altitude,
       },
       supplyDropBearings,
-      soundCues: this.computeSoundCompassCues(p),
+      soundCues: this.spectateActive ? [] : this.computeSoundCompassCues(p),
       waypointBearingRad,
       waypointDist,
       pointerLocked: this.pointerLocked,
       matchPhase: this.matchPhase,
+      multiplayer: this.mpActive
+        ? {
+            active: true,
+            roomCode: this.mpRoomCode,
+            format: this.mpFormat,
+            teamId: this.mpTeamId,
+            aliveTeams: this.mpAliveTeams || this.computeAliveTeamsCount(),
+            rttMs: this.mpClient?.rttMs ?? 0,
+          }
+        : null,
+      spectating:
+        this.spectateActive && spectateTarget
+          ? {
+              active: true,
+              targetId: spectateTarget.id,
+              targetName: spectateTarget.name,
+              targetHeroId: spectateTarget.heroId,
+              health: Math.ceil(spectateTarget.health),
+              shield: Math.ceil(spectateTarget.shield),
+              teamId: spectateTarget.teamId,
+            }
+          : null,
     };
 
     this.callbacks.onHudUpdate(snapshot);
   }
 
   public getMinimapState(): MinimapState {
-    const p = this.player;
-    const revealedAll = Boolean(p && p.revealedAllSec > 0);
+    const p = this.getCameraFocusCombatant();
+    const revealedAll = Boolean(this.player && this.player.revealedAllSec > 0);
 
     const enemies: MinimapEntity[] = [];
     for (const c of this.combatants) {
-      if (!c.alive || c.isPlayer) continue;
+      if (!c.alive) continue;
+      if (p && c.id === p.id) continue;
+      if (this.mpActive && this.mpFormat === 'teams' && this.isFriendly(this.player, c)) {
+        const teamColor = c.teamId ? TEAM_CONFIG[c.teamId].colorCss : '#1A73E8';
+        enemies.push({
+          x: c.pos.x,
+          z: c.pos.z,
+          isTeammate: true,
+          name: c.name,
+          teamColor,
+          color: teamColor,
+          isBot: !c.isRemoteHuman,
+        });
+        continue;
+      }
+      if (c.isPlayer) continue;
       const dist = p ? c.pos.distanceTo(p.pos) : 999;
       const recentlyFired = this.matchElapsed - c.lastShotAt < 2.2 && dist < 115;
       if (revealedAll || dist < 48 || recentlyFired) {
@@ -6496,7 +7445,7 @@ export class WorkspaceRoyaleEngine {
           z: c.pos.z,
           color: revealedAll ? '#10b981' : HERO_MAP[c.heroId].primaryColor,
           revealed: revealedAll,
-          isBot: true,
+          isBot: !c.isRemoteHuman,
         });
       }
     }
@@ -6577,6 +7526,29 @@ export class WorkspaceRoyaleEngine {
 
   private handleKeyDown(e: KeyboardEvent): void {
     if (this.matchPhase !== 'skydrop' && this.matchPhase !== 'playing') return;
+
+    // Live Spectate Mode target cycling (works without pointer lock so Spectate Bar buttons stay clickable!)
+    if (this.spectateActive && !this.mapOpen) {
+      const targetEl = e.target as HTMLElement | null;
+      const isInput =
+        targetEl instanceof HTMLInputElement ||
+        targetEl instanceof HTMLTextAreaElement ||
+        targetEl instanceof HTMLSelectElement;
+      if (!isInput && !e.repeat) {
+        if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
+          e.preventDefault();
+          this.cycleSpectateTarget(-1);
+          return;
+        }
+        if (e.code === 'KeyD' || e.code === 'ArrowRight') {
+          e.preventDefault();
+          this.cycleSpectateTarget(1);
+          return;
+        }
+      }
+      return;
+    }
+
     if (this.mapOpen || !this.pointerLocked) return;
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
       e.preventDefault();
@@ -6642,7 +7614,7 @@ export class WorkspaceRoyaleEngine {
 
   private handleMouseDown(e: MouseEvent): void {
     if (this.matchPhase !== 'skydrop' && this.matchPhase !== 'playing') return;
-    if (this.mapOpen) return;
+    if (this.mapOpen || this.spectateActive) return;
     this.audio.unlock();
     if (!this.pointerLocked) {
       this.requestPointerLock();
@@ -6701,6 +7673,7 @@ export class WorkspaceRoyaleEngine {
   }
 
   private handlePointerLockChange(): void {
+    const wasLocked = this.pointerLocked;
     this.pointerLocked = document.pointerLockElement === this.renderer.domElement;
     if (!this.pointerLocked) {
       this.keys.clear();
@@ -6711,7 +7684,10 @@ export class WorkspaceRoyaleEngine {
       this.sprintLatchedOnSlide = false;
       this.ctrlSlideConsumed = false;
     }
-    if (!this.pointerLocked && this.mapOpen) {
+    if (!this.pointerLocked && (this.mapOpen || !wasLocked)) {
+      return;
+    }
+    if (!this.pointerLocked && this.mpActive && this.matchElapsed < 0.75) {
       return;
     }
     this.callbacks.onPointerLockChange(this.pointerLocked);
@@ -6726,8 +7702,1007 @@ export class WorkspaceRoyaleEngine {
     return a + diff * t;
   }
 
+  // =========================================================================
+  // MULTIPLAYER REAL-TIME SYNC, REMOTE INTERPOLATION & SERVER MESSAGE HANDLER
+  // =========================================================================
+
+  private packCombatantFlags(c: Combatant): number {
+    let flags = 0;
+    if (c.grounded) flags |= FLAG_GROUNDED;
+    if (c.crouching) flags |= FLAG_CROUCHING;
+    if (c.sprinting) flags |= FLAG_SPRINTING;
+    if (c.sliding) flags |= FLAG_SLIDING;
+    if (c.isAds) flags |= FLAG_ADS;
+    if (c.isReloading) flags |= FLAG_RELOADING;
+    if (c.skyDropping) flags |= FLAG_SKYDROPPING;
+    if (c.rewind.active) flags |= FLAG_REWINDING;
+    if (c.channel !== null) flags |= FLAG_CHANNELING;
+    return flags;
+  }
+
+  private updateMultiplayerSync(dt: number): void {
+    const client = this.mpClient;
+    if (!client || !client.isConnected) return;
+    if (this.matchPhase !== 'skydrop' && this.matchPhase !== 'playing') return;
+
+    const nowMs = performance.now();
+    // Expire any stale pending claims (> 2.5s) so failed/raced claims never lock out future retries
+    if (this.mpPendingBikeClaimId && nowMs - this.mpPendingBikeClaimAt > 2500) {
+      this.mpPendingBikeClaimId = null;
+    }
+    if (this.mpPendingLootClaims.size > 0) {
+      for (const [id, ts] of this.mpPendingLootClaims.entries()) {
+        if (nowMs - ts > 2500) {
+          this.mpPendingLootClaims.delete(id);
+        }
+      }
+    }
+
+    // 1. Outbound Local Player State at 20 Hz (50ms)
+    this.mpStateSendAccum += dt;
+    if (this.mpStateSendAccum >= 0.05 && this.player && this.player.alive) {
+      this.mpStateSendAccum = 0;
+      const p = this.player;
+      const slot = p.slots[p.activeSlot];
+      const weaponId = slot && slot.kind === 'weapon' ? (slot.id as WeaponId) : null;
+      const weaponRarity = slot && slot.kind === 'weapon' ? slot.rarity : null;
+      const bike =
+        p.ridingGBikeId !== null
+          ? this.worldGBikes.find((b) => b.id === p.ridingGBikeId) ?? null
+          : null;
+
+      client.send({
+        type: 'player_state',
+        state: {
+          x: Number(p.pos.x.toFixed(2)),
+          y: Number(p.pos.y.toFixed(2)),
+          z: Number(p.pos.z.toFixed(2)),
+          vx: Number(p.vel.x.toFixed(2)),
+          vy: Number(p.vel.y.toFixed(2)),
+          vz: Number(p.vel.z.toFixed(2)),
+          yaw: Number((bike ? bike.yaw : p.yaw).toFixed(3)),
+          pitch: Number(p.pitch.toFixed(3)),
+          flags: this.packCombatantFlags(p),
+          weaponId,
+          weaponRarity,
+          bikeId: bike ? bike.id : null,
+          bikeSteer: bike ? Number(bike.steerAngle.toFixed(3)) : undefined,
+          bikeLean: bike ? Number(bike.leanAngle.toFixed(3)) : undefined,
+          bikeSpeed: bike ? Number(bike.speed.toFixed(2)) : undefined,
+        },
+      });
+    }
+
+    // 2. Host Outbound AI Bot Batch at 10 Hz (100ms)
+    if (this.isMpHost) {
+      this.mpBotBatchAccum += dt;
+      if (this.mpBotBatchAccum >= 0.1) {
+        this.mpBotBatchAccum = 0;
+        const bots: BotStateSample[] = [];
+        for (const c of this.combatants) {
+          if (c.isPlayer || c.isRemoteHuman || !c.alive) continue;
+          const slot = c.slots[c.activeSlot];
+          bots.push({
+            id: c.id,
+            x: Number(c.pos.x.toFixed(2)),
+            y: Number(c.pos.y.toFixed(2)),
+            z: Number(c.pos.z.toFixed(2)),
+            vx: Number(c.vel.x.toFixed(2)),
+            vz: Number(c.vel.z.toFixed(2)),
+            yaw: Number(c.yaw.toFixed(3)),
+            pitch: Number(c.pitch.toFixed(3)),
+            flags: this.packCombatantFlags(c),
+            hp: Math.round(c.health),
+            sh: Math.round(c.shield),
+            alive: c.alive,
+            weaponId: slot && slot.kind === 'weapon' ? (slot.id as WeaponId) : null,
+            weaponRarity: slot && slot.kind === 'weapon' ? slot.rarity : null,
+          });
+        }
+        if (bots.length > 0) {
+          client.send({ type: 'bot_batch', bots });
+        }
+      }
+    }
+  }
+
+  private updateRemoteInterpolatedCombatant(c: Combatant, dt: number): void {
+    const t = c.netTarget;
+    if (!t) return;
+
+    // Position interpolation (snap if > 8m teleport/rewind)
+    const dx = t.x - c.pos.x;
+    const dy = t.y - c.pos.y;
+    const dz = t.z - c.pos.z;
+    const distSq = dx * dx + dy * dy + dz * dz;
+    if (distSq > 64) {
+      c.pos.set(t.x, t.y, t.z);
+    } else {
+      const alpha = Math.min(1, dt * 16);
+      c.pos.x += dx * alpha;
+      c.pos.y += dy * alpha;
+      c.pos.z += dz * alpha;
+    }
+
+    c.vel.set(t.vx, t.vy, t.vz);
+    const prevYaw = c.yaw;
+    c.yaw = this.lerpAngle(c.yaw, t.yaw, Math.min(1, dt * 16));
+    c.pitch += (t.pitch - c.pitch) * Math.min(1, dt * 16);
+
+    // Unpack stance & action bitmask flags
+    const wasSkyDropping = c.skyDropping;
+    const wasReloading = c.isReloading;
+    c.grounded = (t.flags & FLAG_GROUNDED) !== 0;
+    c.crouching = (t.flags & FLAG_CROUCHING) !== 0;
+    c.sprinting = (t.flags & FLAG_SPRINTING) !== 0;
+    c.sliding = (t.flags & FLAG_SLIDING) !== 0;
+    c.isAds = (t.flags & FLAG_ADS) !== 0;
+    c.isReloading = (t.flags & FLAG_RELOADING) !== 0;
+    c.skyDropping = (t.flags & FLAG_SKYDROPPING) !== 0;
+    c.rewind.active = (t.flags & FLAG_REWINDING) !== 0;
+
+    if (!c.grounded && !c.skyDropping) {
+      c.airborneTime += dt;
+    } else {
+      c.airborneTime = 0;
+    }
+
+    // Glider stow / bank / trail sync
+    if (wasSkyDropping && !c.skyDropping) {
+      c.gliderMesh.visible = false;
+      c.glideBank = 0;
+      c.glidePitch = 0;
+      c.hero.model.rotation.x = 0;
+      c.hero.model.rotation.z = 0;
+      c.hero.gliderMount.rotation.set(0, 0, 0);
+      if (c.weaponInstance) {
+        c.weaponInstance.root.visible = c.ridingGBikeId === null;
+      }
+    } else if (c.skyDropping) {
+      c.gliderMesh.visible = true;
+      let yawDelta = c.yaw - prevYaw;
+      yawDelta = ((yawDelta + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      const yawRate = THREE.MathUtils.clamp(yawDelta / Math.max(dt, 0.004), -4.5, 4.5);
+      const targetBank = THREE.MathUtils.clamp(yawRate * 0.12, -0.28, 0.28);
+      const targetPitch = c.sprinting ? -0.32 : -0.10;
+      c.glideBank += (targetBank - c.glideBank) * Math.min(1, dt * 6);
+      c.glidePitch += (targetPitch - c.glidePitch) * Math.min(1, dt * 6);
+      c.gliderTrailTimer -= dt;
+      if (c.gliderTrailTimer <= 0) {
+        c.gliderTrailTimer = c.sprinting ? 0.06 : 0.12;
+        this.vfx.spawnGliderTrail(new THREE.Vector3(c.pos.x, c.pos.y + 2.4, c.pos.z));
+      }
+    }
+
+    // Reload animation timing sync
+    if (!wasReloading && c.isReloading && t.weaponId) {
+      c.reloadDuration = getWeaponReloadTime(t.weaponId, t.weaponRarity ?? 'common');
+      c.reloadTimer = c.reloadDuration;
+    } else if (c.isReloading) {
+      c.reloadTimer = Math.max(0.05, c.reloadTimer - dt);
+    }
+
+    // Slide dust VFX for remote sliding friends
+    if (c.sliding && c.grounded && !c.skyDropping) {
+      c.slideVfxTimer -= dt;
+      if (c.slideVfxTimer <= 0) {
+        c.slideVfxTimer = 0.065;
+        const speed = Math.hypot(c.vel.x, c.vel.z);
+        const sdx = speed > 0.2 ? c.vel.x / speed : -Math.sin(c.yaw);
+        const sdz = speed > 0.2 ? c.vel.z / speed : -Math.cos(c.yaw);
+        this.tmpVecA.set(c.pos.x + sdx * 0.42, c.pos.y + 0.01, c.pos.z + sdz * 0.42);
+        this.vfx.spawnSlideDust(this.tmpVecA, sdx, sdz, c.surface);
+      }
+    }
+
+    // Docs Version History ghost trail VFX for remote rewinding friends
+    if (c.rewind.active) {
+      c.remoteRewindGhostTimer -= dt;
+      if (c.remoteRewindGhostTimer <= 0) {
+        c.remoteRewindGhostTimer = 0.06;
+        this.vfx.spawnDocsGhostTrail(c.pos, c.yaw);
+      }
+    }
+
+    // Equipped weapon visual sync
+    if (t.weaponId) {
+      const rarity = t.weaponRarity ?? 'common';
+      const curSlot = c.slots[0];
+      if (!curSlot || curSlot.kind !== 'weapon' || curSlot.id !== t.weaponId || curSlot.rarity !== rarity) {
+        c.slots[0] = {
+          kind: 'weapon',
+          id: t.weaponId,
+          rarity,
+          ammo: WEAPONS[t.weaponId].magSize,
+        };
+      }
+      c.activeSlot = 0;
+    } else {
+      c.slots[0] = null;
+      c.activeSlot = 0;
+    }
+    this.syncEquippedWeaponVisual(c);
+
+    // Sync Rideable GBike kinematics so remote friends pedal GBikes with full 2-bone IK!
+    if (t.bikeId) {
+      const bike = this.worldGBikes.find((b) => b.id === t.bikeId) ?? null;
+      if (bike) {
+        if (c.ridingGBikeId !== bike.id) {
+          if (c.ridingGBikeId) {
+            const oldBike = this.worldGBikes.find((b) => b.id === c.ridingGBikeId);
+            if (oldBike && oldBike.riderId === c.id) oldBike.riderId = null;
+          }
+          c.ridingGBikeId = bike.id;
+          bike.riderId = c.id;
+          bike.parkTilt = 0;
+          if (c.weaponInstance) {
+            c.weaponInstance.root.visible = false;
+          }
+        }
+        bike.x = c.pos.x;
+        bike.y = c.pos.y;
+        bike.z = c.pos.z;
+        bike.yaw = c.yaw;
+        bike.parkTilt = 0;
+        bike.steerAngle += (t.bikeSteer - bike.steerAngle) * Math.min(1, dt * 14);
+        bike.leanAngle += (t.bikeLean - bike.leanAngle) * Math.min(1, dt * 14);
+        bike.speed += (t.bikeSpeed - bike.speed) * Math.min(1, dt * 14);
+        bike.wheelSpin -= (bike.speed * dt) / 0.34;
+        if (Math.abs(bike.speed) > 0.3) {
+          bike.pedalSpin -= (bike.speed * dt) / 0.22;
+        }
+      }
+    } else if (c.ridingGBikeId !== null) {
+      const oldBike = this.worldGBikes.find((b) => b.id === c.ridingGBikeId);
+      if (oldBike && oldBike.riderId === c.id) {
+        oldBike.riderId = null;
+      }
+      c.ridingGBikeId = null;
+      c.hero.root.rotation.set(0, c.yaw, 0);
+      c.hero.model.position.set(0, 0, 0);
+      c.hero.model.rotation.set(0, 0, 0);
+      if (c.weaponInstance && !c.skyDropping) {
+        c.weaponInstance.root.visible = true;
+      }
+    }
+
+    // Enemy remote footsteps & Visual Sound Compass (crouching & teammates stay silent!)
+    const horizSpeed = Math.hypot(c.vel.x, c.vel.z);
+    if (
+      c.grounded &&
+      !c.skyDropping &&
+      !c.crouching &&
+      !c.sliding &&
+      c.ridingGBikeId === null &&
+      horizSpeed > 1.5 &&
+      !this.isFriendly(this.player, c)
+    ) {
+      c.footstepTimer -= dt;
+      if (c.footstepTimer <= 0) {
+        c.footstepTimer = c.sprinting ? 0.30 : 0.42;
+        this.pushSoundEvent(
+          'footstep',
+          c.pos.x,
+          c.pos.z,
+          c.sprinting ? 40 : 28,
+          0.45,
+          c.sprinting ? 0.95 : 0.72
+        );
+        const listenerPos = this.getCameraFocusPos();
+        const dist = c.pos.distanceTo(listenerPos);
+        if (dist <= 32) {
+          this.audio.playFootstep(c.sprinting, false, c.surface, dist, this.computeSpatialPan(c.pos));
+        }
+      }
+    }
+  }
+
+  private handleMpMessage(msg: ServerMessage): void {
+    if (!this.mpActive) return;
+
+    switch (msg.type) {
+      case 'host_changed': {
+        const wasHost = this.isMpHost;
+        this.mpHostId = msg.hostId;
+        if (!wasHost && this.isMpHost && this.world) {
+          for (const c of this.combatants) {
+            if (!c.isPlayer && !c.isRemoteHuman && c.alive) {
+              if (!c.brain) {
+                const profile = getBotProfile(c.botTier ?? 'tactical');
+                c.brain = new BotBrain(profile, this.world.landmarks);
+              }
+              c.netTarget = undefined;
+              c.aiThinkTimer = Math.random() * 0.1;
+              c.cachedDecision = null;
+            }
+          }
+          this.callbacks.onAnnouncement('HOST MIGRATED', 'You are now hosting match simulation');
+        }
+        break;
+      }
+
+      case 'peer_state':
+        this.applyMpPeerState(msg.state);
+        break;
+
+      case 'bot_batch':
+        if (!this.isMpHost) {
+          this.applyMpBotBatch(msg.bots);
+        }
+        break;
+
+      case 'fire_fx':
+        this.handleMpFireFx(msg.event);
+        break;
+
+      case 'damage_event':
+        this.handleMpDamageEvent(msg.event);
+        break;
+
+      case 'elim_event':
+        this.handleMpElimEvent(msg.event);
+        break;
+
+      case 'vitals_update': {
+        const c = this.combatants.find((item) => item.id === msg.combatantId);
+        if (c && c.alive) {
+          const gainedShield = msg.shield > c.shield + 1;
+          const gainedHealth = msg.health > c.health + 1;
+          c.health = msg.health;
+          c.shield = msg.shield;
+          if (msg.mana !== undefined && !c.isPlayer) {
+            c.mana = msg.mana;
+          }
+          if (!c.isPlayer && (gainedShield || gainedHealth)) {
+            this.vfx.spawnStatusBurst(c.pos, gainedShield ? 0x38bdf8 : 0x22c55e);
+          }
+        }
+        break;
+      }
+
+      case 'ult_cast':
+        this.handleMpUltCast(msg.event);
+        break;
+
+      case 'chest_opened': {
+        this.mpPendingChestOpens.delete(msg.chestId);
+        const chest = this.lootChests.find((ch) => ch.id === msg.chestId);
+        if (chest && !chest.opened) {
+          this.applyOpenedLootChest(chest, msg.openerId === this.mpSelfId, msg.loot);
+        }
+        break;
+      }
+
+      case 'supply_drop_opened': {
+        this.mpPendingDropOpens.delete(msg.dropId);
+        const drop = this.supplyDrops.find((sd) => sd.id === msg.dropId);
+        if (drop && !drop.opened) {
+          this.applyOpenedSupplyDrop(drop, msg.openerId === this.mpSelfId, msg.loot);
+        }
+        break;
+      }
+
+      case 'loot_claimed':
+        this.handleMpLootClaimed(msg.lootId, msg.claimerId);
+        break;
+
+      case 'loot_spawned':
+        for (const item of msg.items) {
+          this.spawnLootDrop(
+            item.x,
+            item.y,
+            item.z,
+            item.kind,
+            item.itemId as WeaponId | UtilityItemId,
+            item.rarity,
+            item.count ?? 1,
+            undefined,
+            item.id
+          );
+        }
+        break;
+
+      case 'bike_state':
+        this.handleMpBikeState(msg);
+        break;
+
+      case 'bike_bell': {
+        const bellPos = new THREE.Vector3(msg.x, msg.y, msg.z);
+        const dist = bellPos.distanceTo(this.getCameraFocusPos());
+        this.audio.playGBikeBell(dist, this.computeSpatialPan(bellPos));
+        this.pushSoundEvent('gbike', msg.x, msg.z, 55, 0.55, 0.9);
+        break;
+      }
+
+      case 'techstop_upgrade': {
+        const fxPos = new THREE.Vector3(msg.x, msg.y, msg.z);
+        this.vfx.spawnTechStopUpgrade(fxPos, msg.newRarity);
+        const dist = fxPos.distanceTo(this.getCameraFocusPos());
+        if (dist <= 45) {
+          this.audio.playTechStopUpgrade(msg.newRarity);
+        }
+        break;
+      }
+
+      case 'match_end':
+        this.handleMpMatchEnd(msg.result);
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  private applyMpPeerState(state: PeerStateUpdate): void {
+    const c = this.combatants.find((item) => item.id === state.id);
+    if (!c || c.isPlayer || !c.alive) return;
+    c.netTarget = {
+      x: state.x,
+      y: state.y,
+      z: state.z,
+      vx: state.vx,
+      vy: state.vy,
+      vz: state.vz,
+      yaw: state.yaw,
+      pitch: state.pitch,
+      flags: state.flags,
+      weaponId: state.weaponId ?? null,
+      weaponRarity: state.weaponRarity ?? null,
+      bikeId: state.bikeId ?? null,
+      bikeSteer: state.bikeSteer ?? 0,
+      bikeLean: state.bikeLean ?? 0,
+      bikeSpeed: state.bikeSpeed ?? 0,
+      receivedAt: performance.now(),
+    };
+  }
+
+  private applyMpBotBatch(bots: BotStateSample[]): void {
+    const now = performance.now();
+    for (const sample of bots) {
+      const c = this.combatants.find((item) => item.id === sample.id);
+      if (!c || c.isPlayer || c.isRemoteHuman) continue;
+      if (!sample.alive) {
+        if (c.alive) {
+          c.alive = false;
+          c.health = 0;
+          c.shield = 0;
+          c.hero.root.visible = false;
+        }
+        continue;
+      }
+      c.health = sample.hp;
+      c.shield = sample.sh;
+      c.netTarget = {
+        x: sample.x,
+        y: sample.y,
+        z: sample.z,
+        vx: sample.vx,
+        vy: 0,
+        vz: sample.vz,
+        yaw: sample.yaw,
+        pitch: sample.pitch,
+        flags: sample.flags,
+        weaponId: sample.weaponId ?? null,
+        weaponRarity: sample.weaponRarity ?? null,
+        bikeId: null,
+        bikeSteer: 0,
+        bikeLean: 0,
+        bikeSpeed: 0,
+        receivedAt: now,
+      };
+    }
+  }
+
+  private handleMpFireFx(ev: FireFxEvent): void {
+    const shooter = this.combatants.find((c) => c.id === ev.shooterId) ?? null;
+    const origin = new THREE.Vector3(ev.ox, ev.oy, ev.oz);
+    const end = new THREE.Vector3(ev.endX, ev.endY, ev.endZ);
+    const listenerPos = this.getCameraFocusPos();
+
+    if (ev.isExplosive) {
+      const radius = ev.explosionRadius ?? 6.5;
+      this.vfx.spawnExplosion(end, radius, 0xc084fc);
+      const dist = end.distanceTo(listenerPos);
+      this.audio.playExplosion(dist, this.computeSpatialPan(end));
+      if (!this.isFriendly(this.player, shooter)) {
+        this.pushSoundEvent('gunfire', end.x, end.z, 105, 0.85, 1.0);
+      }
+      if (this.player && this.player.alive && dist < 24) {
+        this.camController.addShake(Math.max(0.05, (1 - dist / 24) * 0.28));
+      }
+      return;
+    }
+
+    if (shooter) {
+      shooter.lastShotAt = this.matchElapsed;
+    }
+
+    const dir = end.clone().sub(origin);
+    const len = dir.length();
+    if (len > 0.01) {
+      dir.divideScalar(len);
+    } else {
+      dir.set(0, 0, -1);
+    }
+
+    this.vfx.spawnMuzzleFlash(
+      origin,
+      dir,
+      ev.weaponId === 'nova_gl40' ? 0xc084fc : 0xffd166,
+      ev.weaponId === 'breaker_12g' || ev.weaponId === 'longbow_308' ? 1.4 : 0.95
+    );
+
+    const isSniper = ev.weaponId === 'longbow_308';
+    const tracerColor =
+      ev.weaponId === 'longbow_308'
+        ? 0xfef08a
+        : ev.weaponId === 'nova_gl40'
+          ? 0xc084fc
+          : WEAPONS[ev.weaponId]?.color ?? 0x60a5fa;
+    this.vfx.spawnTracer(origin, end, tracerColor, isSniper ? 0.055 : 0.028, isSniper ? 0.28 : 0.095);
+
+    const dist = origin.distanceTo(listenerPos);
+    this.audio.playShot(ev.weaponId, dist, this.computeSpatialPan(origin));
+    if (!this.isFriendly(this.player, shooter)) {
+      this.pushSoundEvent(
+        'gunfire',
+        origin.x,
+        origin.z,
+        ev.weaponId === 'longbow_308' ? 120 : 95,
+        0.65,
+        1.0
+      );
+    }
+  }
+
+  private handleMpDamageEvent(ev: DamageEvent): void {
+    const victim = this.combatants.find((c) => c.id === ev.targetId);
+    if (!victim) return;
+    const attacker = ev.attackerId ? this.combatants.find((c) => c.id === ev.attackerId) ?? null : null;
+
+    const prevHealth = victim.health;
+    const prevShield = victim.shield;
+    victim.health = ev.newHealth;
+    victim.shield = ev.newShield;
+    victim.lastDamagedAt = this.matchElapsed;
+    victim.recentDamageTaken += ev.amount;
+    if (attacker && attacker.id !== victim.id) {
+      victim.lastAttackerId = attacker.id;
+    }
+
+    if (ev.isStorm) {
+      if (victim.isPlayer) {
+        this.audio.playStormTick();
+        this.callbacks.onDirectionalDamage({ bearingRad: Math.PI, amount: ev.amount, isStorm: true });
+      }
+      return;
+    }
+
+    const hitPoint =
+      ev.hitX === 0 && ev.hitY === 0 && ev.hitZ === 0
+        ? new THREE.Vector3(victim.pos.x, victim.pos.y + 1.1, victim.pos.z)
+        : new THREE.Vector3(ev.hitX, ev.hitY, ev.hitZ);
+
+    const shieldAbsorbed = Math.max(0, prevShield - ev.newShield);
+    const hpLoss = Math.max(0, prevHealth - ev.newHealth);
+    const shieldHit = shieldAbsorbed > 0 || ev.shieldBroken;
+
+    victim.hero.flashHit(ev.headshot ? 0xfbbf24 : shieldHit ? 0x38bdf8 : 0xef4444, 0.72);
+    victim.hitFlashTimer = 0.11;
+    this.vfx.spawnHitImpact(hitPoint, {
+      isShield: shieldHit,
+      isHeadshot: ev.headshot,
+    });
+
+    if (ev.shieldBroken) {
+      this.vfx.spawnShieldBreak(victim.pos);
+      const isDirect = Boolean(ev.attackerId === this.mpSelfId || victim.isPlayer);
+      const dist = victim.pos.distanceTo(this.getCameraFocusPos());
+      this.audio.playShieldCrack(dist, isDirect, isDirect ? 0 : this.computeSpatialPan(victim.pos));
+      if (victim.isPlayer) {
+        this.callbacks.onPlayerShieldBreak?.();
+        this.camController.addShake(0.18);
+      }
+    }
+
+    // Attacker feedback for local player
+    if (ev.attackerId === this.mpSelfId && ev.targetId !== this.mpSelfId && this.player) {
+      this.player.damageDealt += ev.amount;
+      if (ev.headshot) this.player.headshots++;
+      const killed = ev.newHealth <= 0;
+      this.audio.playHitmarker(ev.headshot, shieldAbsorbed > 0 && hpLoss === 0);
+      this.callbacks.onHitMarker(ev.headshot, killed, ev.shieldBroken);
+
+      const screen = this.projectWorldToScreen(hitPoint);
+      if (screen) {
+        this.callbacks.onFloatingDamage({
+          screenX: screen.x,
+          screenY: screen.y,
+          amount: ev.amount,
+          kind: ev.headshot ? 'headshot' : shieldAbsorbed > hpLoss ? 'shield' : 'health',
+          worldX: hitPoint.x,
+          worldY: hitPoint.y,
+          worldZ: hitPoint.z,
+        });
+      }
+    }
+
+    // Victim directional damage arc & shake for local player
+    if (victim.isPlayer && attacker && attacker.id !== victim.id) {
+      const dx = attacker.pos.x - victim.pos.x;
+      const dz = attacker.pos.z - victim.pos.z;
+      const fx = -Math.sin(victim.yaw);
+      const fz = -Math.cos(victim.yaw);
+      const rx = Math.cos(victim.yaw);
+      const rz = -Math.sin(victim.yaw);
+      const bearingRad = Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz);
+      this.callbacks.onDirectionalDamage({ bearingRad, amount: ev.amount, isStorm: false });
+      this.camController.addShake(Math.min(0.24, 0.06 + ev.amount * 0.003));
+    }
+  }
+
+  private handleMpElimEvent(ev: ElimEvent): void {
+    this.mpAliveTeams = ev.aliveTeams;
+    const victim = this.combatants.find((c) => c.id === ev.victimId);
+    const killer = ev.killerId ? this.combatants.find((c) => c.id === ev.killerId) ?? null : null;
+
+    if (victim && victim.alive) {
+      if (victim.ridingGBikeId) {
+        this.dismountGBike(victim, false, false);
+      }
+      if (victim.sliding) {
+        this.endSlide(victim, false);
+      }
+      victim.alive = false;
+      victim.health = 0;
+      victim.shield = 0;
+      victim.channel = null;
+      if (victim.isPlayer) {
+        this.sprintLatchedOnChannel = false;
+        this.sprintLatchedOnSlide = false;
+        this.ctrlSlideConsumed = false;
+      }
+      victim.sprinting = false;
+      this.cancelReload(victim);
+      victim.hero.root.visible = false;
+
+      this.vfx.spawnExplosion(
+        new THREE.Vector3(victim.pos.x, victim.pos.y + 1.0, victim.pos.z),
+        2.6,
+        HERO_MAP[victim.heroId].hexPrimary
+      );
+
+      // Authoritative death loot broadcast: local victim drops their own gear; Host drops AI bot gear
+      const ownsDeathDrop =
+        victim.isPlayer || (this.isMpHost && !victim.isRemoteHuman);
+      if (ownsDeathDrop) {
+        let bestWeapon: InventorySlot | null = null;
+        const carriedItems: InventorySlot[] = [];
+        const rarityRank: Record<Rarity, number> = { common: 1, rare: 2, epic: 3 };
+        for (const s of victim.slots) {
+          if (!s) continue;
+          if (s.kind === 'weapon') {
+            if (!bestWeapon || rarityRank[s.rarity] > rarityRank[bestWeapon.rarity]) {
+              bestWeapon = s;
+            }
+          } else if ((s.count ?? 0) > 0) {
+            carriedItems.push(s);
+          }
+        }
+        carriedItems.sort((a, b) => rarityRank[b.rarity] - rarityRank[a.rarity]);
+
+        const deathDrops: { kind: 'weapon' | 'item'; id: WeaponId | UtilityItemId; rarity: Rarity; count: number }[] = [];
+        if (bestWeapon) {
+          deathDrops.push({ kind: 'weapon', id: bestWeapon.id, rarity: bestWeapon.rarity, count: 1 });
+        }
+        for (const it of carriedItems.slice(0, 2)) {
+          deathDrops.push({ kind: 'item', id: it.id, rarity: it.rarity, count: it.count ?? 1 });
+        }
+
+        if (deathDrops.length > 0) {
+          const groundY = this.physics.getSupportHeight(victim.pos.x, victim.pos.z, victim.pos.y + 1, 0.3, 0.5);
+          const syncedItems: SyncedGroundLoot[] = [];
+          deathDrops.forEach((d, idx) => {
+            const ang = (idx / Math.max(1, deathDrops.length)) * Math.PI * 2 + 0.4;
+            const dist = deathDrops.length === 1 ? 0.5 : 0.95;
+            const dx = Number((victim.pos.x + Math.cos(ang) * dist).toFixed(2));
+            const dz = Number((victim.pos.z + Math.sin(ang) * dist).toFixed(2));
+            const rawDy = this.physics.getSupportHeight(dx, dz, victim.pos.y + 1, 0.3, 0.5);
+            const dy = Number((Math.abs(rawDy - groundY) <= 1.2 ? rawDy : groundY).toFixed(2));
+            const lootId = `death_${victim.id}_${idx}`;
+            this.spawnLootDrop(dx, dy, dz, d.kind, d.id, d.rarity, d.count, undefined, lootId);
+            syncedItems.push({
+              id: lootId,
+              kind: d.kind,
+              itemId: d.id,
+              rarity: d.rarity,
+              count: d.count,
+              x: dx,
+              y: dy,
+              z: dz,
+            });
+          });
+          this.mpClient?.send({ type: 'loot_spawn', items: syncedItems });
+        }
+      }
+    }
+
+    if (killer && victim && killer.id !== victim.id) {
+      killer.eliminations++;
+      killer.mana = Math.min(GAME_CONSTANTS.MAX_MANA, killer.mana + GAME_CONSTANTS.ELIM_MANA_BONUS);
+      this.audio.playElimination(killer.isPlayer);
+    } else {
+      this.audio.playElimination(false);
+    }
+
+    if (victim) {
+      this.callbacks.onKillFeed({
+        id: this.nextKillFeedSeq++,
+        killer: ev.isStorm ? 'Googleplex Storm' : killer ? killer.name : 'Campus Hazard',
+        killerHero: killer ? killer.heroId : victim.heroId,
+        victim: victim.name,
+        victimHero: victim.heroId,
+        weapon: ev.weaponName,
+        headshot: ev.headshot,
+        isUltimate: ev.isUltimate,
+        isStorm: ev.isStorm,
+        timestamp: this.matchElapsed,
+      });
+    }
+
+    // If we were spectating the eliminated combatant, auto-advance to next alive target
+    if (this.spectateActive && this.spectateTargetId === ev.victimId) {
+      const next = this.pickBestSpectateTarget(ev.killerId);
+      if (next) {
+        this.camController.reset(next.pos, next.yaw);
+      }
+    }
+
+    // Local player eliminated while match is still ongoing -> show Eliminated modal with "Spectate Match"
+    const matchOngoing =
+      this.mpFormat === 'teams' ? ev.aliveTeams > 1 : ev.aliveCount > 1;
+    if (victim?.isPlayer && matchOngoing && this.player) {
+      this.mapOpen = false;
+      this.mouseLeftDown = false;
+      this.mouseRightDown = false;
+      this.keys.clear();
+      this.audio.setGliderWind(false);
+      if (document.pointerLockElement === this.renderer.domElement) {
+        document.exitPointerLock();
+      }
+      this.audio.playDefeat();
+      const heroDef = HERO_MAP[this.player.heroId];
+      const summary: MatchSummary = {
+        won: false,
+        placement: ev.placement,
+        totalPlayers: this.combatants.length,
+        heroId: this.player.heroId,
+        heroName: heroDef.productName,
+        heroPersona: heroDef.personaName,
+        eliminations: this.player.eliminations,
+        headshots: this.player.headshots,
+        damageDealt: Math.round(this.player.damageDealt),
+        survivedSeconds: Math.round(this.matchElapsed),
+        botDifficulty: this.activeBotDifficulty,
+        gameMode: this.activeGameMode,
+        isMultiplayer: true,
+        matchOngoing: true,
+        teamId: this.mpTeamId,
+      };
+      this.emitHudSnapshot();
+      this.callbacks.onMatchEnd(summary);
+    }
+  }
+
+  private handleMpUltCast(ev: UltCastEvent): void {
+    const caster = this.combatants.find((c) => c.id === ev.casterId) ?? null;
+    const castPos = new THREE.Vector3(ev.x, ev.y, ev.z);
+    const dist = castPos.distanceTo(this.getCameraFocusPos());
+    this.audio.playUltimate(ev.heroId, dist, this.computeSpatialPan(castPos));
+    if (!this.isFriendly(this.player, caster)) {
+      this.pushSoundEvent('gunfire', ev.x, ev.z, 105, 0.85, 1.0);
+    }
+
+    switch (ev.heroId) {
+      case 'gmail':
+        if (caster) {
+          this.castGmailReplyAll(caster, true);
+        }
+        break;
+      case 'drive':
+        if (caster) {
+          this.castDriveAccessRevoked(caster, true);
+        } else {
+          const visual = this.vfx.createDriveGuardrailDome(castPos, 12.0);
+          this.guardrailZones.push({
+            ownerId: ev.casterId,
+            center: castPos,
+            radius: 12.0,
+            elapsed: 0,
+            duration: 6.0,
+            visual,
+          });
+        }
+        break;
+      case 'calendar':
+        if (caster) {
+          this.castCalendarHardStop(caster);
+        } else {
+          const visual = this.vfx.createCalendarChronoField(castPos, 20.0);
+          this.chronoZones.push({
+            ownerId: ev.casterId,
+            center: castPos,
+            radius: 20.0,
+            elapsed: 0,
+            duration: 6.0,
+            visual,
+          });
+        }
+        break;
+      case 'chat':
+        if (caster) {
+          this.castChatPingOverload(caster, true);
+        } else {
+          this.vfx.spawnChatPingWave(castPos, 28.0);
+        }
+        break;
+      case 'slides': {
+        const origin = new THREE.Vector3(ev.x, ev.y + 1.4, ev.z);
+        const dir =
+          ev.targetX !== undefined && ev.targetY !== undefined && ev.targetZ !== undefined
+            ? new THREE.Vector3(ev.targetX - origin.x, ev.targetY - origin.y, ev.targetZ - origin.z)
+            : new THREE.Vector3(-Math.sin(ev.yaw), 0, -Math.cos(ev.yaw));
+        if (dir.lengthSq() < 0.001) {
+          dir.set(-Math.sin(ev.yaw), 0, -Math.cos(ev.yaw));
+        } else {
+          dir.normalize();
+        }
+        this.vfx.spawnSlidesChargeBeam(origin, dir, 85, 0.3);
+        this.pendingBeams.push({
+          ownerId: ev.casterId,
+          origin,
+          dir,
+          remaining: 0.3,
+          visualOnly: true,
+        });
+        break;
+      }
+      case 'docs':
+        this.vfx.spawnDocsRedlinePulse(castPos, 12.0);
+        break;
+    }
+  }
+
+  private handleMpLootClaimed(lootId: string, claimerId: string): void {
+    this.mpPendingLootClaims.delete(lootId);
+    const idx = this.lootDrops.findIndex((l) => l.id === lootId);
+    if (idx < 0) return;
+    const loot = this.lootDrops[idx];
+
+    const claimer = this.combatants.find((c) => c.id === claimerId) ?? null;
+    if (claimer && (claimer.isPlayer || (this.isMpHost && !claimer.isRemoteHuman))) {
+      this.applyClaimedLootToCombatant(claimer, loot);
+    } else {
+      this.scene.remove(loot.visual.root);
+      this.lootDrops.splice(idx, 1);
+    }
+  }
+
+  private handleMpBikeState(
+    msg: Extract<ServerMessage, { type: 'bike_state' }>
+  ): void {
+    const bike = this.worldGBikes.find((b) => b.id === msg.bikeId);
+    if (!bike) return;
+
+    if (msg.riderId !== null) {
+      if (this.mpPendingBikeClaimId === msg.bikeId) {
+        this.mpPendingBikeClaimId = null;
+        if (msg.riderId !== this.mpSelfId) {
+          this.callbacks.onAnnouncement('GBIKE TAKEN', 'Another player claimed this GBike');
+        }
+      }
+      if (msg.riderId === this.mpSelfId && this.player && this.player.alive) {
+        if (this.player.ridingGBikeId !== bike.id) {
+          bike.riderId = null;
+          this.mountGBike(this.player, bike);
+        }
+      } else {
+        const rider = this.combatants.find((c) => c.id === msg.riderId) ?? null;
+        bike.riderId = msg.riderId;
+        bike.parkTilt = 0;
+        if (rider) {
+          rider.ridingGBikeId = bike.id;
+          if (rider.weaponInstance) {
+            rider.weaponInstance.root.visible = false;
+          }
+        }
+      }
+    } else {
+      if (bike.riderId) {
+        const oldRider = this.combatants.find((c) => c.id === bike.riderId) ?? null;
+        if (oldRider && !oldRider.isPlayer && oldRider.ridingGBikeId === bike.id) {
+          oldRider.ridingGBikeId = null;
+          oldRider.hero.root.rotation.set(0, oldRider.yaw, 0);
+          oldRider.hero.model.position.set(0, 0, 0);
+          oldRider.hero.model.rotation.set(0, 0, 0);
+          if (oldRider.weaponInstance && !oldRider.skyDropping) {
+            oldRider.weaponInstance.root.visible = true;
+          }
+        }
+      }
+      bike.riderId = null;
+      if (msg.x !== undefined && msg.y !== undefined && msg.z !== undefined) {
+        bike.x = msg.x;
+        bike.y = msg.y;
+        bike.z = msg.z;
+      }
+      if (msg.yaw !== undefined) {
+        bike.yaw = msg.yaw;
+      }
+      if (msg.speed !== undefined) {
+        bike.speed = msg.speed;
+      }
+    }
+  }
+
+  private handleMpMatchEnd(result: MatchEndPayload): void {
+    this.spectateActive = false;
+    this.spectateTargetId = null;
+    this.matchPhase = 'ended';
+    this.mapOpen = false;
+    this.mouseLeftDown = false;
+    this.mouseRightDown = false;
+    this.sprintLatchedOnReload = false;
+    this.sprintLatchedOnChannel = false;
+    this.sprintLatchedOnSlide = false;
+    this.ctrlSlideConsumed = false;
+    this.keys.clear();
+    this.audio.setGliderWind(false);
+    if (document.pointerLockElement === this.renderer.domElement) {
+      document.exitPointerLock();
+    }
+
+    const selfRank = result.rankings.find((r) => r.id === this.mpSelfId) ?? null;
+    const won =
+      this.mpFormat === 'teams'
+        ? Boolean(this.mpTeamId && result.winnerTeamId && result.winnerTeamId === this.mpTeamId)
+        : result.winnerId === this.mpSelfId;
+
+    if (won) {
+      this.audio.playVictory();
+    } else {
+      this.audio.playDefeat();
+    }
+
+    const heroId = this.player?.heroId ?? 'gmail';
+    const heroDef = HERO_MAP[heroId];
+    const summary: MatchSummary = {
+      won,
+      placement: selfRank?.placement ?? (won ? 1 : result.totalPlayers),
+      totalPlayers: result.totalPlayers || this.combatants.length,
+      heroId,
+      heroName: heroDef.productName,
+      heroPersona: heroDef.personaName,
+      eliminations: selfRank?.eliminations ?? this.player?.eliminations ?? 0,
+      headshots: selfRank?.headshots ?? this.player?.headshots ?? 0,
+      damageDealt: Math.round(selfRank?.damageDealt ?? this.player?.damageDealt ?? 0),
+      survivedSeconds: result.survivedSeconds || Math.round(this.matchElapsed),
+      botDifficulty: this.activeBotDifficulty,
+      gameMode: this.activeGameMode,
+      isMultiplayer: true,
+      matchOngoing: false,
+      teamId: this.mpTeamId,
+      winnerTeamId: result.winnerTeamId,
+      winnerName: result.winnerName,
+    };
+
+    this.emitHudSnapshot();
+    this.callbacks.onMatchEnd(summary);
+  }
+
   public dispose(): void {
     this.disposed = true;
+    this.detachMpSessionState();
     this.sprintLatchedOnReload = false;
     this.sprintLatchedOnChannel = false;
     this.sprintLatchedOnSlide = false;

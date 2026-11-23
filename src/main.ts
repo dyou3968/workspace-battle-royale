@@ -21,6 +21,28 @@ import {
   WEAPONS,
 } from './data/catalog';
 import { HudCallbacks, WorkspaceRoyaleEngine } from './gameplay/engine';
+import {
+  buildRoomInviteUrl,
+  MP_NOT_CONFIGURED_MESSAGE,
+  MpStatusSnapshot,
+  MultiplayerClient,
+  readRoomCodeFromUrl,
+  resolveMpServerUrl,
+} from './net/mpClient';
+import {
+  isValidRoomCode,
+  MatchStartPayload,
+  MpBotDifficulty,
+  MpGameModeId,
+  MpHeroId,
+  normalizeRoomCode,
+  RoomFormat,
+  RoomLobbySnapshot,
+  sanitizeDisplayName,
+  ServerMessage,
+  TEAM_CONFIG,
+  TeamId,
+} from './net/protocol';
 import { TacticalMinimap } from './ui/minimap';
 import {
   BotDifficulty,
@@ -45,6 +67,7 @@ type MenuPage = 'home' | 'modes' | 'characters' | 'settings';
 type SettingsTab = 'gameplay' | 'video' | 'audio' | 'controls';
 
 const SETTINGS_STORAGE_KEY = 'workspace_royale_settings_v1';
+const MP_NAME_STORAGE_KEY = 'workspace_royale_mp_name';
 
 // ==================== AUTHENTIC MULTI-COLOR GOOGLE WORKSPACE PRODUCT SVGs ====================
 const HERO_PRODUCT_SVGS: Record<ProductHeroId, string> = {
@@ -154,6 +177,7 @@ const charactersShowcaseSlot = document.getElementById('characters-showcase-slot
 
 // Page 1: Home DOM
 const btnHomePlay = document.getElementById('btn-home-play') as HTMLButtonElement;
+const btnHomeMultiplayer = document.getElementById('btn-home-multiplayer') as HTMLButtonElement;
 const homeCardMode = document.getElementById('home-card-mode') as HTMLButtonElement;
 const homeCardHero = document.getElementById('home-card-hero') as HTMLButtonElement;
 const homeCardSettings = document.getElementById('home-card-settings') as HTMLButtonElement;
@@ -272,6 +296,55 @@ const reloadBarWrap = document.getElementById('reload-bar-wrap')!;
 const reloadBarFill = document.getElementById('reload-bar-fill')!;
 const hotbarEl = document.getElementById('hotbar')!;
 
+// Multiplayer Private Rooms, Live HUD Pill, Spectate Bar & Gameover Extensions
+const mpJoinOverlay = document.getElementById('mp-join-overlay')!;
+const mpNameInput = document.getElementById('mp-name-input') as HTMLInputElement;
+const mpJoinHeroLabel = document.getElementById('mp-join-hero-label')!;
+const btnMpJoinChangeHero = document.getElementById('btn-mp-join-change-hero') as HTMLButtonElement;
+const btnMpCreateRoom = document.getElementById('btn-mp-create-room') as HTMLButtonElement;
+const mpCodeInput = document.getElementById('mp-code-input') as HTMLInputElement;
+const btnMpJoinRoom = document.getElementById('btn-mp-join-room') as HTMLButtonElement;
+const mpJoinStatus = document.getElementById('mp-join-status')!;
+const btnMpJoinClose = document.getElementById('btn-mp-join-close') as HTMLButtonElement;
+
+const mpLobbyOverlay = document.getElementById('mp-lobby-overlay')!;
+const mpLobbyCode = document.getElementById('mp-lobby-code')!;
+const btnMpCopyLink = document.getElementById('btn-mp-copy-link') as HTMLButtonElement;
+const mpLobbyConn = document.getElementById('mp-lobby-conn')!;
+const btnMpLeaveRoom = document.getElementById('btn-mp-leave-room') as HTMLButtonElement;
+const mpLobbyPlayerCount = document.getElementById('mp-lobby-player-count')!;
+const mpRosterList = document.getElementById('mp-roster-list')!;
+const mpLobbyHeroPicker = document.getElementById('mp-lobby-hero-picker')!;
+const mpTeamPickerWrap = document.getElementById('mp-team-picker-wrap')!;
+const mpLobbySettings = document.getElementById('mp-lobby-settings')!;
+const mpSettingsRoleBadge = document.getElementById('mp-settings-role-badge')!;
+const mpFormatGroup = document.getElementById('mp-format-group')!;
+const mpModeGroup = document.getElementById('mp-mode-group')!;
+const mpFillBotsToggle = document.getElementById('mp-fill-bots-toggle') as HTMLInputElement;
+const mpDiffBlock = document.getElementById('mp-diff-block')!;
+const mpDiffGroup = document.getElementById('mp-diff-group')!;
+const mpCountdownBanner = document.getElementById('mp-countdown-banner')!;
+const btnMpReady = document.getElementById('btn-mp-ready') as HTMLButtonElement;
+const btnMpStartMatch = document.getElementById('btn-mp-start-match') as HTMLButtonElement;
+const mpWaitingHostNote = document.getElementById('mp-waiting-host-note')!;
+
+const hudMpPill = document.getElementById('hud-mp-pill')!;
+const legendTeammate = document.getElementById('legend-teammate')!;
+const spectateBar = document.getElementById('spectate-bar')!;
+const spectateTargetName = document.getElementById('spectate-target-name')!;
+const spectateTargetVitals = document.getElementById('spectate-target-vitals')!;
+const btnSpectatePrev = document.getElementById('btn-spectate-prev') as HTMLButtonElement;
+const btnSpectateNext = document.getElementById('btn-spectate-next') as HTMLButtonElement;
+const btnSpectateLobby = document.getElementById('btn-spectate-lobby') as HTMLButtonElement;
+
+const goTeamRow = document.getElementById('go-team-row')!;
+const goTeamEl = document.getElementById('go-team')!;
+const btnPlayAgain = document.getElementById('btn-play-again') as HTMLButtonElement;
+const btnChangeHero = document.getElementById('btn-change-hero') as HTMLButtonElement;
+const btnGameoverSpectate = document.getElementById('btn-gameover-spectate') as HTMLButtonElement;
+const btnGameoverRoom = document.getElementById('btn-gameover-room') as HTMLButtonElement;
+const btnGameoverHome = document.getElementById('btn-gameover-home') as HTMLButtonElement;
+
 // ==================== SETTINGS PERSISTENCE ====================
 function clampNum(val: number, min: number, max: number, fallback: number): number {
   if (typeof val !== 'number' || !Number.isFinite(val)) return fallback;
@@ -372,6 +445,72 @@ let lastHeroHudId: ProductHeroId | null = null;
 let lastHudModeId: GameModeId | null = null;
 let lastActiveNameColor = '';
 let lastCrosshairGap = '';
+
+// Multiplayer Lobby & Session UI State
+const mpClient = new MultiplayerClient();
+let mpRoomSnapshot: RoomLobbySnapshot | null = null;
+let mpSelfId: string | null = null;
+let mpJoinBusy = false;
+let mpCopyTimer: number | undefined;
+let mpLobbyNoticeTimer: number | undefined;
+let mpLobbyNoticeText: string | null = null;
+let mpLastRosterSig = '';
+
+function loadSavedMpName(): string {
+  try {
+    return window.localStorage.getItem(MP_NAME_STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function saveMpName(name: string): void {
+  try {
+    window.localStorage.setItem(MP_NAME_STORAGE_KEY, name);
+  } catch {
+    // Ignore storage errors in private mode
+  }
+}
+
+function setRoomCodeInUrl(code: string | null): void {
+  try {
+    const url = new URL(window.location.href);
+    if (code) {
+      url.searchParams.set('room', normalizeRoomCode(code));
+    } else {
+      url.searchParams.delete('room');
+    }
+    window.history.replaceState(null, '', url.toString());
+  } catch {
+    // Ignore history errors in restricted frames
+  }
+}
+
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through to legacy copy fallback
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
 
 const textCache = new WeakMap<HTMLElement, string>();
 const widthCache = new WeakMap<HTMLElement, string>();
@@ -1000,6 +1139,7 @@ function updateHeroDetails(): void {
   previewShowcasePill.textContent = lobbyWeapon
     ? `✦ ${h.lobbyAnimLabel} · ${lobbyWeapon.skinName} (${lobbyWeapon.name})`
     : `✦ ${h.lobbyAnimLabel} · Unarmed`;
+  mpJoinHeroLabel.textContent = h.personaName;
   showcase.setHero(selectedHeroId);
   updateHomeSummary();
 }
@@ -1574,6 +1714,50 @@ function renderHud(state: HudSnapshot): void {
     }
   }
 
+  // Live Multiplayer Room / Team Pill & Fullmap Teammate Legend
+  if (state.multiplayer?.active) {
+    hudMpPill.classList.remove('hidden');
+    hudMpPill.classList.remove('team-blue', 'team-red', 'team-yellow', 'team-green');
+    if (state.multiplayer.format === 'teams' && state.multiplayer.teamId) {
+      const tCfg = TEAM_CONFIG[state.multiplayer.teamId];
+      hudMpPill.classList.add(`team-${state.multiplayer.teamId}`);
+      hudMpPill.dataset.team = state.multiplayer.teamId;
+      setTextCached(
+        hudMpPill,
+        `TEAM ${tCfg.label.toUpperCase()} · ${state.multiplayer.aliveTeams} TEAMS · ${state.multiplayer.rttMs}ms`
+      );
+      legendTeammate.classList.remove('hidden');
+    } else {
+      delete hudMpPill.dataset.team;
+      setTextCached(hudMpPill, `ROOM ${state.multiplayer.roomCode} · ${state.multiplayer.rttMs}ms`);
+      legendTeammate.classList.add('hidden');
+    }
+  } else {
+    hudMpPill.classList.add('hidden');
+    legendTeammate.classList.add('hidden');
+  }
+
+  // Live Spectate Mode Bar
+  if (state.spectating?.active) {
+    hudEl.classList.add('is-spectating');
+    spectateBar.classList.remove('hidden');
+    const targetHero = HERO_MAP[state.spectating.targetHeroId] ?? HERO_MAP.gmail;
+    const teamTag = state.spectating.teamId
+      ? ` [${TEAM_CONFIG[state.spectating.teamId].label}]`
+      : '';
+    setTextCached(
+      spectateTargetName,
+      `${state.spectating.targetName}${teamTag} · ${targetHero.personaName}`
+    );
+    setTextCached(
+      spectateTargetVitals,
+      `HP ${Math.max(0, state.spectating.health)} · SHD ${Math.max(0, state.spectating.shield)}`
+    );
+  } else {
+    hudEl.classList.remove('is-spectating');
+    spectateBar.classList.add('hidden');
+  }
+
   // Hero Authentic Multi-Color Product SVG, Mode Label & Counters (cached)
   if (lastHeroHudId !== state.heroId) {
     lastHeroHudId = state.heroId;
@@ -1875,7 +2059,13 @@ const hudCallbacks: Omit<HudCallbacks, 'onHitMarker'> & {
   onPointerLockChange: (locked) => {
     if (splashActive) return;
     if (!lobbyOverlay.classList.contains('hidden')) return;
+    if (!mpJoinOverlay.classList.contains('hidden')) return;
+    if (!mpLobbyOverlay.classList.contains('hidden')) return;
     if (!gameoverOverlay.classList.contains('hidden')) return;
+    if (engine.isSpectating()) {
+      pauseOverlay.classList.add('hidden');
+      return;
+    }
     if (isFullMapOpen || engine.isMapOpen()) {
       pauseOverlay.classList.add('hidden');
       return;
@@ -1883,7 +2073,10 @@ const hudCallbacks: Omit<HudCallbacks, 'onHitMarker'> & {
     pauseOverlay.classList.toggle('hidden', locked);
   },
   onMatchEnd: (summary: MatchSummary) => {
-    currentMatchPhase = 'ended';
+    const isOngoingElim = Boolean(summary.isMultiplayer && summary.matchOngoing);
+    if (!isOngoingElim) {
+      currentMatchPhase = 'ended';
+    }
     splashActive = false;
     stopSplashUiTicker();
     splashOverlay.classList.remove('active');
@@ -1894,6 +2087,8 @@ const hudCallbacks: Omit<HudCallbacks, 'onHitMarker'> & {
     lobbyOverlay.classList.add('hidden');
     pauseOverlay.classList.add('hidden');
     sniperScopeOverlay.classList.add('hidden');
+    hudEl.classList.remove('is-spectating');
+    spectateBar.classList.add('hidden');
     resetCombatFeedbackUi();
     gameoverOverlay.classList.remove('hidden');
 
@@ -1907,10 +2102,50 @@ const hudCallbacks: Omit<HudCallbacks, 'onHitMarker'> & {
     goPlacement.classList.toggle('is-victory', summary.won);
     goPlacement.classList.toggle('is-eliminated', !summary.won);
 
-    document.getElementById('go-title')!.textContent = summary.won ? 'Victory Royale!' : 'Eliminated';
-    document.getElementById('go-subtitle')!.textContent = summary.won
-      ? `${summary.heroPersona} conquered ${mode.name} at the Mountain View Googleplex.`
-      : `Finished #${summary.placement} of ${summary.totalPlayers} in ${mode.name}.`;
+    const isMp = Boolean(summary.isMultiplayer);
+    if (isMp && summary.teamId) {
+      const tCfg = TEAM_CONFIG[summary.teamId];
+      goTeamRow.classList.remove('hidden');
+      goTeamEl.textContent = `Team ${tCfg.label}`;
+      goTeamEl.style.color = tCfg.colorCss;
+    } else {
+      goTeamRow.classList.add('hidden');
+    }
+
+    // Toggle Solo vs Multiplayer gameover actions
+    btnPlayAgain.classList.toggle('hidden', isMp);
+    btnChangeHero.classList.toggle('hidden', isMp);
+    btnGameoverSpectate.classList.toggle('hidden', !(isMp && summary.matchOngoing === true));
+    btnGameoverRoom.classList.toggle('hidden', !isMp);
+    btnGameoverHome.classList.remove('hidden');
+
+    const titleEl = document.getElementById('go-title')!;
+    const subEl = document.getElementById('go-subtitle')!;
+    if (isMp) {
+      if (summary.won) {
+        titleEl.textContent = summary.winnerTeamId
+          ? `Team ${TEAM_CONFIG[summary.winnerTeamId].label} Victory!`
+          : 'Victory Royale!';
+        subEl.textContent = summary.winnerTeamId
+          ? `Your squad conquered ${mode.name} at the Mountain View Googleplex.`
+          : `${summary.heroPersona} conquered ${mode.name} at the Mountain View Googleplex.`;
+      } else {
+        titleEl.textContent = 'Eliminated';
+        if (summary.matchOngoing) {
+          subEl.textContent = `Finished #${summary.placement} of ${summary.totalPlayers} — Match still in progress!`;
+        } else if (summary.winnerName) {
+          subEl.textContent = `${summary.winnerName} won the match · You finished #${summary.placement} of ${summary.totalPlayers}.`;
+        } else {
+          subEl.textContent = `Finished #${summary.placement} of ${summary.totalPlayers} in ${mode.name}.`;
+        }
+      }
+    } else {
+      titleEl.textContent = summary.won ? 'Victory Royale!' : 'Eliminated';
+      subEl.textContent = summary.won
+        ? `${summary.heroPersona} conquered ${mode.name} at the Mountain View Googleplex.`
+        : `Finished #${summary.placement} of ${summary.totalPlayers} in ${mode.name}.`;
+    }
+
     document.getElementById('go-hero')!.textContent = summary.heroPersona;
     document.getElementById('go-elims')!.textContent = String(summary.eliminations);
     document.getElementById('go-headshots')!.textContent = String(summary.headshots);
@@ -2050,6 +2285,486 @@ function openSplashFromMenu(): void {
   startSplashUiTicker();
 }
 
+// ==================== MULTIPLAYER PRIVATE ROOMS & WAITING ROOM CONTROLLER ====================
+function setMpJoinStatus(
+  message: string | null,
+  kind: 'info' | 'error' | 'success' = 'info'
+): void {
+  if (!message) {
+    mpJoinStatus.textContent = '';
+    mpJoinStatus.classList.add('hidden');
+    mpJoinStatus.classList.remove('is-error', 'is-success');
+    return;
+  }
+  mpJoinStatus.textContent = message;
+  mpJoinStatus.classList.remove('hidden', 'is-error', 'is-success');
+  if (kind === 'error') mpJoinStatus.classList.add('is-error');
+  if (kind === 'success') mpJoinStatus.classList.add('is-success');
+}
+
+function setMpJoinBusy(busy: boolean): void {
+  mpJoinBusy = busy;
+  btnMpCreateRoom.disabled = busy;
+  btnMpJoinRoom.disabled = busy;
+  mpCodeInput.disabled = busy;
+  mpNameInput.disabled = busy;
+}
+
+function openMpJoinModal(prefillCode?: string): void {
+  mpJoinHeroLabel.textContent = HERO_MAP[selectedHeroId].personaName;
+  if (prefillCode) {
+    mpCodeInput.value = normalizeRoomCode(prefillCode);
+  }
+  setMpJoinBusy(false);
+  setMpJoinStatus(null);
+  mpJoinOverlay.classList.remove('hidden');
+  showcase.setActive(false);
+}
+
+function closeMpJoinModal(): void {
+  mpJoinOverlay.classList.add('hidden');
+  setMpJoinBusy(false);
+  setMpJoinStatus(null);
+  syncShowcasePlacement();
+}
+
+function showMpLobbyNotice(message: string, durationMs = 3600): void {
+  mpLobbyNoticeText = message;
+  clearTimeout(mpLobbyNoticeTimer);
+  renderMpLobby();
+  mpLobbyNoticeTimer = window.setTimeout(() => {
+    mpLobbyNoticeText = null;
+    renderMpLobby();
+  }, durationMs);
+}
+
+function updateMpConnBadge(snap: MpStatusSnapshot): void {
+  mpLobbyConn.classList.remove('is-connecting', 'is-disconnected', 'is-error');
+  if (snap.status === 'connected') {
+    const rttTxt = snap.rttMs != null ? ` · ${snap.rttMs}ms` : '';
+    setTextCached(mpLobbyConn, `Connected${rttTxt}`);
+  } else if (snap.status === 'connecting') {
+    mpLobbyConn.classList.add('is-connecting');
+    setTextCached(mpLobbyConn, 'Connecting...');
+  } else if (snap.status === 'error') {
+    mpLobbyConn.classList.add('is-error');
+    setTextCached(mpLobbyConn, 'Connection Error');
+  } else {
+    mpLobbyConn.classList.add('is-disconnected');
+    setTextCached(mpLobbyConn, 'Disconnected');
+  }
+}
+
+function renderMpLobby(): void {
+  const room = mpRoomSnapshot;
+  if (!room) return;
+
+  setTextCached(mpLobbyCode, room.roomCode);
+  const connectedCount = room.members.filter((m) => m.connected).length;
+  setTextCached(mpLobbyPlayerCount, `${connectedCount} / ${room.settings.maxPlayers}`);
+  updateMpConnBadge(mpClient.getStatusSnapshot());
+
+  const selfMember = mpSelfId ? room.members.find((m) => m.id === mpSelfId) ?? null : null;
+  const isHost = Boolean(mpSelfId && room.hostId === mpSelfId);
+  const isCountdown = room.phase === 'countdown';
+  const isTeams = room.settings.format === 'teams';
+
+  // Render live player roster (skip DOM rebuild when identical)
+  const rosterSig =
+    `${room.settings.format}|${room.hostId}|${mpSelfId ?? ''}|` +
+    room.members
+      .map((m) => `${m.id}:${m.name}:${m.heroId}:${m.teamId}:${m.ready ? 1 : 0}:${m.isHost ? 1 : 0}:${m.connected ? 1 : 0}`)
+      .join('|');
+  if (rosterSig !== mpLastRosterSig) {
+    mpLastRosterSig = rosterSig;
+    if (room.members.length === 0) {
+      mpRosterList.innerHTML = '<div class="mp-roster-empty">Waiting for players to join...</div>';
+    } else {
+      mpRosterList.innerHTML = room.members
+        .map((m) => {
+          const h = HERO_MAP[m.heroId] ?? HERO_MAP.gmail;
+          const isSelf = m.id === mpSelfId;
+          const rowCls = `mp-roster-row${isSelf ? ' is-self' : ''}${m.connected ? '' : ' is-disconnected'}`;
+          const hostBadge = m.isHost ? '<span class="mp-host-badge">Host</span>' : '';
+          const teamPill = isTeams
+            ? `<span class="mp-team-pill team-${m.teamId}" data-team="${m.teamId}">${escapeHtml(TEAM_CONFIG[m.teamId].label)}</span>`
+            : '';
+          const readyPill = `<span class="mp-ready-pill${m.ready ? ' is-ready' : ''}">${m.ready ? 'Ready' : 'Waiting'}</span>`;
+          return `
+            <div class="${rowCls}" role="listitem">
+              <div class="mp-roster-avatar" style="--hero-color: ${h.primaryColor}">${HERO_PRODUCT_SVGS[h.id]}</div>
+              <div class="mp-roster-info">
+                <div class="mp-roster-name">${escapeHtml(m.name)}${isSelf ? ' (You)' : ''}</div>
+                <div class="mp-roster-hero">${escapeHtml(h.personaName)}</div>
+              </div>
+              <div class="mp-roster-badges">
+                ${hostBadge}
+                ${teamPill}
+                ${readyPill}
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+    }
+  }
+
+  // Sync personal Hero picker pills
+  const activeHero = selfMember?.heroId ?? selectedHeroId;
+  mpLobbyHeroPicker.querySelectorAll<HTMLButtonElement>('.mp-hero-pill').forEach((btn) => {
+    btn.classList.toggle('selected', btn.dataset.hero === activeHero);
+    btn.disabled = isCountdown;
+  });
+
+  // Sync Team picker visibility & selection (Teams format only)
+  mpTeamPickerWrap.classList.toggle('hidden', !isTeams);
+  if (isTeams) {
+    const activeTeam = selfMember?.teamId ?? 'blue';
+    mpTeamPickerWrap.querySelectorAll<HTMLButtonElement>('.mp-team-btn').forEach((btn) => {
+      btn.classList.toggle('selected', btn.dataset.team === activeTeam);
+      btn.disabled = isCountdown;
+    });
+  }
+
+  // Sync Match Settings (Host editable vs Guests read-only)
+  mpLobbySettings.classList.toggle('is-host', isHost);
+  mpLobbySettings.classList.toggle('is-readonly', !isHost);
+  setTextCached(mpSettingsRoleBadge, isHost ? 'Host Controls' : 'Host Only');
+
+  mpFormatGroup.querySelectorAll<HTMLButtonElement>('.mp-seg-btn').forEach((btn) => {
+    btn.classList.toggle('selected', btn.dataset.format === room.settings.format);
+    btn.disabled = !isHost || isCountdown;
+  });
+  mpModeGroup.querySelectorAll<HTMLButtonElement>('.mp-seg-btn').forEach((btn) => {
+    btn.classList.toggle('selected', btn.dataset.mode === room.settings.mode);
+    btn.disabled = !isHost || isCountdown;
+  });
+  mpFillBotsToggle.checked = room.settings.fillBots;
+  mpFillBotsToggle.disabled = !isHost || isCountdown;
+  mpDiffBlock.classList.toggle('is-disabled', !room.settings.fillBots);
+  mpDiffGroup.querySelectorAll<HTMLButtonElement>('.mp-seg-btn').forEach((btn) => {
+    btn.classList.toggle('selected', btn.dataset.diff === room.settings.botDifficulty);
+    btn.disabled = !isHost || !room.settings.fillBots || isCountdown;
+  });
+
+  // Countdown Banner
+  if (isCountdown && room.countdownSec > 0) {
+    mpCountdownBanner.classList.remove('hidden');
+    setTextCached(mpCountdownBanner, `DROPPING IN ${room.countdownSec}...`);
+  } else {
+    mpCountdownBanner.classList.add('hidden');
+  }
+
+  // Ready button & Host Launch footer
+  const selfReady = Boolean(selfMember?.ready);
+  btnMpReady.classList.toggle('is-ready', selfReady);
+  setTextCached(btnMpReady, selfReady ? '✓ Ready' : 'Ready Up');
+  btnMpReady.disabled = isCountdown || room.phase === 'playing';
+
+  btnMpStartMatch.classList.toggle('hidden', !isHost);
+  if (isHost) {
+    btnMpStartMatch.disabled = isCountdown || !assetsReady || room.phase === 'playing';
+    setTextCached(
+      btnMpStartMatch,
+      !assetsReady
+        ? `Loading 3D (${lastLoadPct}%)...`
+        : isCountdown
+          ? 'Launching...'
+          : room.phase === 'playing'
+            ? 'Match In Progress'
+            : 'Drop In!'
+    );
+  }
+
+  if (mpLobbyNoticeText) {
+    mpWaitingHostNote.classList.remove('hidden');
+    setTextCached(mpWaitingHostNote, mpLobbyNoticeText);
+  } else if (!isHost) {
+    mpWaitingHostNote.classList.remove('hidden');
+    setTextCached(
+      mpWaitingHostNote,
+      room.phase === 'playing'
+        ? 'Match in progress — waiting for round to finish...'
+        : isCountdown
+          ? 'Host launched match — get ready!'
+          : 'Waiting for host to launch...'
+    );
+  } else {
+    mpWaitingHostNote.classList.add('hidden');
+  }
+}
+
+async function launchMultiplayerMatch(payload: MatchStartPayload): Promise<void> {
+  const selfId = mpSelfId ?? mpClient.memberId;
+  if (!selfId) return;
+
+  if (!assetsReady) {
+    mpCountdownBanner.classList.remove('hidden');
+    setTextCached(mpCountdownBanner, `LOADING 3D CAMPUS (${lastLoadPct}%)...`);
+    await preloadPromise;
+  }
+  // Guard if player disconnected while waiting on preload
+  if (!mpClient.isConnected) return;
+
+  const selfSpec = payload.combatants.find((c) => c.id === selfId);
+  const heroId: ProductHeroId = selfSpec?.heroId ?? selectedHeroId;
+  const mode = GAME_MODES[payload.settings.mode] ?? GAME_MODES.battle_royale;
+  const hero = HERO_MAP[heroId] ?? HERO_MAP.gmail;
+  pauseMatchPill.textContent = `${mode.name} · ${hero.personaName} · Room ${mpClient.roomCode ?? ''}`;
+
+  splashActive = false;
+  stopSplashUiTicker();
+  if (engine.getSplashAttractState().active) {
+    engine.stopSplashAttract();
+  }
+  splashOverlay.classList.remove('active');
+  splashOverlay.classList.add('hidden');
+  setInMatchSettingsMode(false);
+  closeFullMap(false);
+  mpJoinOverlay.classList.add('hidden');
+  mpLobbyOverlay.classList.add('hidden');
+  lobbyOverlay.classList.add('hidden');
+  lobbyOverlay.classList.remove('active');
+  gameoverOverlay.classList.add('hidden');
+  pauseOverlay.classList.add('hidden');
+  sniperScopeOverlay.classList.add('hidden');
+  showcase.setActive(false);
+  hudEl.classList.remove('hidden', 'is-spectating');
+  spectateBar.classList.add('hidden');
+  killFeedEl.innerHTML = '';
+  damageArcLayer.innerHTML = '';
+  resetCombatFeedbackUi();
+  lastHotbarSig = '';
+  lastStatusSig = '';
+  lastPerfSig = '';
+  lastHeroHudId = null;
+  lastHudModeId = null;
+  lastMinimapRenderMs = 0;
+  lastFullMapRenderMs = 0;
+  lastPerfUpdateMs = 0;
+  currentMatchPhase = 'skydrop';
+  syncPerfHudVisibility();
+  engine.applySettings(currentSettings);
+  engine.startMultiplayerMatch(mpClient, payload, selfId);
+}
+
+function openMpLobbyOverlay(): void {
+  splashActive = false;
+  stopSplashUiTicker();
+  if (engine.getSplashAttractState().active) {
+    engine.stopSplashAttract();
+  }
+  splashOverlay.classList.remove('active');
+  splashOverlay.classList.add('hidden');
+  mpJoinOverlay.classList.add('hidden');
+  setMpJoinBusy(false);
+  setMpJoinStatus(null);
+  hudEl.classList.add('hidden');
+  hudEl.classList.remove('is-spectating');
+  spectateBar.classList.add('hidden');
+  pauseOverlay.classList.add('hidden');
+  gameoverOverlay.classList.add('hidden');
+  sniperScopeOverlay.classList.add('hidden');
+  lobbyOverlay.classList.remove('hidden');
+  lobbyOverlay.classList.add('active');
+  showcase.setActive(false);
+  mpLobbyOverlay.classList.remove('hidden');
+  mpLastRosterSig = '';
+  renderMpLobby();
+}
+
+function returnToMpRoomLobby(): void {
+  currentMatchPhase = 'lobby';
+  setInMatchSettingsMode(false);
+  closeFullMap(false);
+  engine.leaveMultiplayerMatch();
+  engine.setMapOpen(false);
+  resetCombatFeedbackUi();
+
+  if (!mpClient.isConnected) {
+    leaveMultiplayerRoomToHome();
+    return;
+  }
+
+  const isHost = Boolean(mpSelfId && mpRoomSnapshot?.hostId === mpSelfId);
+  if (
+    mpRoomSnapshot?.phase === 'ended' ||
+    (isHost && (mpRoomSnapshot?.phase === 'playing' || mpRoomSnapshot?.phase === 'countdown'))
+  ) {
+    mpClient.send({ type: 'return_lobby' });
+  }
+  openMpLobbyOverlay();
+}
+
+function leaveMultiplayerRoomToHome(): void {
+  clearTimeout(mpLobbyNoticeTimer);
+  mpLobbyNoticeText = null;
+  mpRoomSnapshot = null;
+  mpSelfId = null;
+  mpLastRosterSig = '';
+  mpClient.disconnect('Left room');
+  setRoomCodeInUrl(null);
+  mpJoinOverlay.classList.add('hidden');
+  mpLobbyOverlay.classList.add('hidden');
+  hudMpPill.classList.add('hidden');
+  legendTeammate.classList.add('hidden');
+  spectateBar.classList.add('hidden');
+  hudEl.classList.remove('is-spectating');
+  returnToLobby('home');
+}
+
+function handleMpServerMessage(msg: ServerMessage): void {
+  switch (msg.type) {
+    case 'welcome': {
+      mpSelfId = msg.memberId;
+      mpRoomSnapshot = msg.room;
+      setRoomCodeInUrl(msg.room.roomCode);
+      openMpLobbyOverlay();
+      break;
+    }
+
+    case 'room_state': {
+      mpRoomSnapshot = msg.room;
+      // Only pull out of active match if match was cancelled mid-game (don't yank players off Game Over stats early!)
+      if (
+        engine.isInMultiplayerMatch() &&
+        msg.room.phase === 'lobby' &&
+        gameoverOverlay.classList.contains('hidden')
+      ) {
+        currentMatchPhase = 'lobby';
+        setInMatchSettingsMode(false);
+        closeFullMap(false);
+        engine.leaveMultiplayerMatch();
+        engine.setMapOpen(false);
+        resetCombatFeedbackUi();
+        openMpLobbyOverlay();
+        return;
+      }
+      if (!mpLobbyOverlay.classList.contains('hidden')) {
+        renderMpLobby();
+      }
+      break;
+    }
+
+    case 'countdown': {
+      if (mpRoomSnapshot) {
+        mpRoomSnapshot = {
+          ...mpRoomSnapshot,
+          phase: 'countdown',
+          countdownSec: msg.seconds,
+        };
+      }
+      // If a player was still reading Game Over stats when Host launched a rematch countdown, transition cleanly
+      if (!gameoverOverlay.classList.contains('hidden') && engine.isInMultiplayerMatch()) {
+        currentMatchPhase = 'lobby';
+        engine.leaveMultiplayerMatch();
+        openMpLobbyOverlay();
+      }
+      mpCountdownBanner.classList.remove('hidden');
+      setTextCached(mpCountdownBanner, `DROPPING IN ${msg.seconds}...`);
+      if (!mpLobbyOverlay.classList.contains('hidden')) {
+        renderMpLobby();
+      }
+      break;
+    }
+
+    case 'match_start': {
+      void launchMultiplayerMatch(msg.match);
+      break;
+    }
+
+    case 'error': {
+      setMpJoinBusy(false);
+      if (!mpJoinOverlay.classList.contains('hidden')) {
+        setMpJoinStatus(msg.message, 'error');
+      } else if (!mpLobbyOverlay.classList.contains('hidden')) {
+        showMpLobbyNotice(msg.message, 4000);
+      } else if (engine.isInMultiplayerMatch()) {
+        showBanner('ROOM NOTICE', msg.message);
+      }
+      break;
+    }
+
+    default:
+      break;
+  }
+}
+
+function handleMpStatusChange(snap: MpStatusSnapshot): void {
+  updateMpConnBadge(snap);
+  if (snap.status === 'error') {
+    setMpJoinBusy(false);
+    if (!mpJoinOverlay.classList.contains('hidden') && snap.errorMessage) {
+      setMpJoinStatus(snap.errorMessage, 'error');
+    } else if (!mpLobbyOverlay.classList.contains('hidden') && snap.errorMessage) {
+      showMpLobbyNotice(snap.errorMessage, 4500);
+    }
+  } else if (snap.status === 'disconnected') {
+    setMpJoinBusy(false);
+  }
+}
+
+mpClient.onMessage(handleMpServerMessage);
+mpClient.onStatusChange(handleMpStatusChange);
+
+async function handleCreatePrivateRoom(): Promise<void> {
+  if (mpJoinBusy) return;
+  const serverUrl = resolveMpServerUrl();
+  if (!serverUrl) {
+    setMpJoinStatus(MP_NOT_CONFIGURED_MESSAGE, 'error');
+    return;
+  }
+  const name = sanitizeDisplayName(mpNameInput.value, 'Googler');
+  mpNameInput.value = name;
+  saveMpName(name);
+
+  setMpJoinBusy(true);
+  setMpJoinStatus('Creating private room...', 'info');
+  try {
+    const code = await mpClient.createRoom(serverUrl);
+    setMpJoinStatus(`Joining room ${code}...`, 'info');
+    const started = mpClient.connect(code, { name, heroId: selectedHeroId }, serverUrl);
+    if (!started) {
+      setMpJoinBusy(false);
+      setMpJoinStatus(mpClient.errorMessage ?? 'Unable to connect to room.', 'error');
+    }
+  } catch (err) {
+    setMpJoinBusy(false);
+    const msg =
+      err instanceof Error && err.message
+        ? err.message
+        : 'Unable to reach multiplayer server. Make sure the realtime worker is running.';
+    setMpJoinStatus(msg, 'error');
+  }
+}
+
+function handleJoinPrivateRoom(): void {
+  if (mpJoinBusy) return;
+  const code = normalizeRoomCode(mpCodeInput.value);
+  mpCodeInput.value = code;
+  if (!isValidRoomCode(code)) {
+    setMpJoinStatus('Enter a valid 4–6 character room code.', 'error');
+    mpCodeInput.focus();
+    return;
+  }
+  const serverUrl = resolveMpServerUrl();
+  if (!serverUrl) {
+    setMpJoinStatus(MP_NOT_CONFIGURED_MESSAGE, 'error');
+    return;
+  }
+  const name = sanitizeDisplayName(mpNameInput.value, 'Googler');
+  mpNameInput.value = name;
+  saveMpName(name);
+
+  setMpJoinBusy(true);
+  setMpJoinStatus(`Connecting to room ${code}...`, 'info');
+  const started = mpClient.connect(code, { name, heroId: selectedHeroId }, serverUrl);
+  if (!started) {
+    setMpJoinBusy(false);
+    setMpJoinStatus(mpClient.errorMessage ?? 'Unable to connect to room.', 'error');
+  }
+}
+
 // ==================== BOOTSTRAP MENU, SETTINGS & ASSET PRELOAD ====================
 bindSplashSceneBarElements();
 renderModeSelector();
@@ -2062,16 +2777,34 @@ syncPerfHudVisibility();
 updateHeroDetails();
 navigateMenu('home');
 
-// Initial landing view = Live 3D Splash Screen (keep LobbyHeroShowcase paused while Splash is visible)
-splashActive = true;
-showcase.setActive(false);
-lobbyOverlay.classList.add('hidden');
-lobbyOverlay.classList.remove('active');
-splashOverlay.classList.remove('hidden');
-splashOverlay.classList.add('active');
-engine.startSplashAttract();
-updateSplashSceneUi();
-startSplashUiTicker();
+// Restore saved Multiplayer display name
+const savedMpName = loadSavedMpName();
+if (savedMpName) {
+  mpNameInput.value = savedMpName;
+}
+
+// Deep-Link Invite URL (?room=CODE) skips Splash straight into 1-click Join modal
+const initialInviteRoomCode = readRoomCodeFromUrl();
+if (initialInviteRoomCode) {
+  splashActive = false;
+  splashOverlay.classList.remove('active');
+  splashOverlay.classList.add('hidden');
+  lobbyOverlay.classList.remove('hidden');
+  lobbyOverlay.classList.add('active');
+  navigateMenu('home');
+  openMpJoinModal(initialInviteRoomCode);
+} else {
+  // Initial landing view = Live 3D Splash Screen (keep LobbyHeroShowcase paused while Splash is visible)
+  splashActive = true;
+  showcase.setActive(false);
+  lobbyOverlay.classList.add('hidden');
+  lobbyOverlay.classList.remove('active');
+  splashOverlay.classList.remove('hidden');
+  splashOverlay.classList.add('active');
+  engine.startSplashAttract();
+  updateSplashSceneUi();
+  startSplashUiTicker();
+}
 
 function handleLoadProgress(p: LoadingProgress): void {
   if (p.total > 0) {
@@ -2102,6 +2835,9 @@ function handleLoadProgress(p: LoadingProgress): void {
     chipMiniFill.style.width = `${pct}%`;
     setTextCached(splashAssetBadge, `Loading 3D ${pct}%`);
     updatePlayButtons();
+    if (mpRoomSnapshot && !mpLobbyOverlay.classList.contains('hidden')) {
+      renderMpLobby();
+    }
   }
 
   // Hero-first showcase preview: prepare hero turntable silently without rendering during Splash
@@ -2116,7 +2852,7 @@ function handleLoadProgress(p: LoadingProgress): void {
   }
 }
 
-engine
+const preloadPromise: Promise<void> = engine
   .preloadAssets(handleLoadProgress)
   .then(() => {
     assetsReady = true;
@@ -2139,6 +2875,9 @@ engine
     setTextCached(splashAssetBadge, `${totalCount} 3D Assets Ready`);
 
     updatePlayButtons();
+    if (mpRoomSnapshot && !mpLobbyOverlay.classList.contains('hidden')) {
+      renderMpLobby();
+    }
     if (splashActive) {
       updateSplashSceneUi();
     }
@@ -2157,6 +2896,9 @@ engine
     splashAssetBadge.classList.add('ready');
     setTextCached(splashAssetBadge, 'Campus Ready');
     updatePlayButtons();
+    if (mpRoomSnapshot && !mpLobbyOverlay.classList.contains('hidden')) {
+      renderMpLobby();
+    }
     if (splashActive) {
       updateSplashSceneUi();
     }
@@ -2179,6 +2921,8 @@ function launchMatch(): void {
   }
   splashOverlay.classList.remove('active');
   splashOverlay.classList.add('hidden');
+  mpJoinOverlay.classList.add('hidden');
+  mpLobbyOverlay.classList.add('hidden');
   setInMatchSettingsMode(false);
   closeFullMap(false);
   lobbyOverlay.classList.add('hidden');
@@ -2187,7 +2931,10 @@ function launchMatch(): void {
   pauseOverlay.classList.add('hidden');
   sniperScopeOverlay.classList.add('hidden');
   showcase.setActive(false);
-  hudEl.classList.remove('hidden');
+  hudEl.classList.remove('hidden', 'is-spectating');
+  hudMpPill.classList.add('hidden');
+  legendTeammate.classList.add('hidden');
+  spectateBar.classList.add('hidden');
   killFeedEl.innerHTML = '';
   damageArcLayer.innerHTML = '';
   resetCombatFeedbackUi();
@@ -2206,16 +2953,32 @@ function launchMatch(): void {
 }
 
 function returnToLobby(targetPage: MenuPage = 'home'): void {
+  if (engine.isInMultiplayerMatch() || mpClient.isConnected) {
+    clearTimeout(mpLobbyNoticeTimer);
+    mpLobbyNoticeText = null;
+    mpRoomSnapshot = null;
+    mpSelfId = null;
+    mpLastRosterSig = '';
+    engine.leaveMultiplayerMatch();
+    mpClient.disconnect('Returned home');
+    setRoomCodeInUrl(null);
+  }
   currentMatchPhase = 'lobby';
   splashActive = false;
   stopSplashUiTicker();
   splashOverlay.classList.remove('active');
   splashOverlay.classList.add('hidden');
+  mpJoinOverlay.classList.add('hidden');
+  mpLobbyOverlay.classList.add('hidden');
   setInMatchSettingsMode(false);
   closeFullMap(false);
   engine.pauseToLobby();
   engine.setMapOpen(false);
   hudEl.classList.add('hidden');
+  hudEl.classList.remove('is-spectating');
+  hudMpPill.classList.add('hidden');
+  legendTeammate.classList.add('hidden');
+  spectateBar.classList.add('hidden');
   pauseOverlay.classList.add('hidden');
   gameoverOverlay.classList.add('hidden');
   sniperScopeOverlay.classList.add('hidden');
@@ -2270,6 +3033,121 @@ btnModesPlay.addEventListener('click', launchMatch);
 btnCharsPlay.addEventListener('click', launchMatch);
 btnFlipPreview.addEventListener('click', () => showcase.flipFrontBack());
 
+// Multiplayer Entry, Join Modal & Waiting Room Controls
+btnHomeMultiplayer.addEventListener('click', () => openMpJoinModal());
+btnMpJoinClose.addEventListener('click', closeMpJoinModal);
+btnMpJoinChangeHero.addEventListener('click', () => {
+  closeMpJoinModal();
+  navigateMenu('characters');
+});
+mpNameInput.addEventListener('input', () => {
+  saveMpName(mpNameInput.value);
+});
+mpCodeInput.addEventListener('input', () => {
+  const cleaned = normalizeRoomCode(mpCodeInput.value);
+  if (mpCodeInput.value !== cleaned) {
+    mpCodeInput.value = cleaned;
+  }
+});
+mpCodeInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    handleJoinPrivateRoom();
+  }
+});
+btnMpCreateRoom.addEventListener('click', () => {
+  void handleCreatePrivateRoom();
+});
+btnMpJoinRoom.addEventListener('click', handleJoinPrivateRoom);
+
+btnMpCopyLink.addEventListener('click', async () => {
+  const code = mpRoomSnapshot?.roomCode ?? mpClient.roomCode;
+  if (!code) return;
+  const inviteUrl = buildRoomInviteUrl(code);
+  const ok = await copyTextToClipboard(inviteUrl);
+  const labelSpan = btnMpCopyLink.querySelector('span');
+  btnMpCopyLink.classList.add('is-copied');
+  if (labelSpan) {
+    labelSpan.textContent = ok ? 'Copied!' : code;
+  }
+  clearTimeout(mpCopyTimer);
+  mpCopyTimer = window.setTimeout(() => {
+    btnMpCopyLink.classList.remove('is-copied');
+    if (labelSpan) {
+      labelSpan.textContent = 'Copy Invite Link';
+    }
+  }, 1800);
+});
+
+btnMpLeaveRoom.addEventListener('click', leaveMultiplayerRoomToHome);
+
+mpLobbyHeroPicker.querySelectorAll<HTMLButtonElement>('.mp-hero-pill').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const heroId = btn.dataset.hero as MpHeroId | undefined;
+    if (!heroId) return;
+    selectedHeroId = heroId;
+    renderHeroSelector();
+    updateHeroDetails();
+    mpClient.send({ type: 'update_profile', heroId });
+  });
+});
+
+mpTeamPickerWrap.querySelectorAll<HTMLButtonElement>('.mp-team-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const teamId = btn.dataset.team as TeamId | undefined;
+    if (!teamId) return;
+    mpClient.send({ type: 'update_profile', teamId });
+  });
+});
+
+mpFormatGroup.querySelectorAll<HTMLButtonElement>('.mp-seg-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const format = btn.dataset.format as RoomFormat | undefined;
+    if (!format) return;
+    mpClient.send({ type: 'update_settings', settings: { format } });
+  });
+});
+
+mpModeGroup.querySelectorAll<HTMLButtonElement>('.mp-seg-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const mode = btn.dataset.mode as MpGameModeId | undefined;
+    if (!mode) return;
+    mpClient.send({ type: 'update_settings', settings: { mode } });
+  });
+});
+
+mpFillBotsToggle.addEventListener('change', () => {
+  mpClient.send({
+    type: 'update_settings',
+    settings: { fillBots: mpFillBotsToggle.checked },
+  });
+});
+
+mpDiffGroup.querySelectorAll<HTMLButtonElement>('.mp-seg-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const botDifficulty = btn.dataset.diff as MpBotDifficulty | undefined;
+    if (!botDifficulty) return;
+    mpClient.send({ type: 'update_settings', settings: { botDifficulty } });
+  });
+});
+
+btnMpReady.addEventListener('click', () => {
+  const selfMember = mpSelfId
+    ? mpRoomSnapshot?.members.find((m) => m.id === mpSelfId) ?? null
+    : null;
+  mpClient.send({ type: 'update_profile', ready: !(selfMember?.ready ?? false) });
+});
+
+btnMpStartMatch.addEventListener('click', () => {
+  if (!assetsReady) return;
+  mpClient.send({ type: 'start_match' });
+});
+
+// Live Spectate Bar Controls
+btnSpectatePrev.addEventListener('click', () => engine.cycleSpectateTarget(-1));
+btnSpectateNext.addEventListener('click', () => engine.cycleSpectateTarget(1));
+btnSpectateLobby.addEventListener('click', returnToMpRoomLobby);
+
 // Pause & Game Over Actions
 document.getElementById('btn-resume')!.addEventListener('click', () => {
   pauseOverlay.classList.add('hidden');
@@ -2283,9 +3161,15 @@ document.getElementById('btn-pause-controls')!.addEventListener('click', () => {
 });
 document.getElementById('btn-back-lobby')!.addEventListener('click', () => returnToLobby('home'));
 
-document.getElementById('btn-play-again')!.addEventListener('click', launchMatch);
-document.getElementById('btn-change-hero')!.addEventListener('click', () => returnToLobby('characters'));
-document.getElementById('btn-gameover-home')!.addEventListener('click', () => returnToLobby('home'));
+btnPlayAgain.addEventListener('click', launchMatch);
+btnChangeHero.addEventListener('click', () => returnToLobby('characters'));
+btnGameoverSpectate.addEventListener('click', () => {
+  if (engine.startSpectating()) {
+    gameoverOverlay.classList.add('hidden');
+  }
+});
+btnGameoverRoom.addEventListener('click', returnToMpRoomLobby);
+btnGameoverHome.addEventListener('click', () => returnToLobby('home'));
 
 // Full Tactical Map [M] Click-to-Ping Waypoint & Close Controls
 fullmapCanvas.addEventListener('mousedown', (e) => {
@@ -2363,6 +3247,18 @@ window.addEventListener('keydown', (e) => {
       return;
     }
 
+    return;
+  }
+
+  // 0b. Multiplayer Create/Join & Waiting Room Modals (block Solo menu shortcuts cleanly)
+  if (!mpJoinOverlay.classList.contains('hidden')) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeMpJoinModal();
+    }
+    return;
+  }
+  if (!mpLobbyOverlay.classList.contains('hidden')) {
     return;
   }
 

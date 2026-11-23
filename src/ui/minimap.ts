@@ -1429,8 +1429,15 @@ export class TacticalMinimap {
       this.drawFullMapLandmarkPills(ctx, proj);
     }
 
-    // 5. Nearby / Chat-Revealed Enemies
+    // 5. Nearby / Chat-Revealed Enemies (drawn beneath teammates & local player)
     for (const enemy of state.enemies) {
+      const ext = enemy as MinimapState['enemies'][number] & {
+        isTeammate?: boolean;
+        name?: string;
+        teamColor?: string;
+      };
+      if (ext.isTeammate) continue;
+
       const ex = proj.wx(enemy.x);
       const ey = proj.wz(enemy.z);
       const isRevealed = Boolean(enemy.revealed || state.revealedAll);
@@ -1450,6 +1457,62 @@ export class TacticalMinimap {
       ctx.strokeStyle = '#0f172a';
       ctx.lineWidth = detailed ? 1.4 : 0.85;
       ctx.stroke();
+    }
+
+    // 5a. Always-Visible Teammate Markers + Full Tactical Map Nameplates (draw human squadmates on top of AI bots)
+    const teammates = state.enemies
+      .filter((entity) => Boolean(entity.isTeammate))
+      .sort((a, b) => (a.isBot === b.isBot ? 0 : a.isBot ? -1 : 1));
+
+    for (const mate of teammates) {
+      const tx = proj.wx(mate.x);
+      const ty = proj.wz(mate.z);
+      const teamCol = mate.teamColor || mate.color || '#1A73E8';
+      const dotR = detailed ? 5.4 : 3.2;
+
+      ctx.save();
+      // Subtle outer dark halo so teammates pop over blue roofs & green lawns
+      ctx.beginPath();
+      ctx.arc(tx, ty, dotR + (detailed ? 2.6 : 1.8), 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+      ctx.fill();
+
+      // Crisp team-colored circular marker with bold pure white border
+      ctx.beginPath();
+      ctx.arc(tx, ty, dotR, 0, Math.PI * 2);
+      ctx.fillStyle = teamCol;
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = detailed ? 2.0 : 1.8;
+      ctx.stroke();
+
+      // Compact crisp nameplate right above dot on Full Tactical Map (truncated to 10 chars)
+      if (detailed && mate.name) {
+        const trimmed = mate.name.trim();
+        if (trimmed.length > 0) {
+          const label = trimmed.length > 10 ? trimmed.slice(0, 10) : trimmed;
+          ctx.font = '700 9.5px -apple-system, BlinkMacSystemFont, "Inter", sans-serif';
+          const tw = ctx.measureText(label).width;
+          const pw = Math.ceil(tw + 10);
+          const ph = 15;
+          const lx = Math.max(6, Math.min(proj.cssW - pw - 6, tx - pw * 0.5));
+          const rawLy = ty < 26 ? ty + dotR + 5 : ty - dotR - 4 - ph;
+          const ly = Math.max(4, Math.min(proj.cssH - ph - 4, rawLy));
+
+          drawRoundedRectPath(ctx, lx, ly, pw, ph, 7.5);
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+          ctx.fill();
+          ctx.strokeStyle = teamCol;
+          ctx.lineWidth = 1.25;
+          ctx.stroke();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(label, lx + pw * 0.5, ly + ph * 0.5 + 0.5);
+        }
+      }
+      ctx.restore();
     }
 
     const px = proj.wx(state.playerX);
