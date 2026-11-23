@@ -667,6 +667,293 @@ export class VfxSystem {
     }
   }
 
+  /** Blinding flashbang detonation: bright white flash sphere, shockwave ring, 22 sparks & flash light. */
+  public spawnFlashbangBurst(pos: THREE.Vector3): void {
+    const group = new THREE.Group();
+    group.position.copy(pos);
+
+    const flashMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.98,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const flashSphere = new THREE.Mesh(this.unitSphereGeo, flashMat);
+    flashSphere.scale.setScalar(0.45);
+    group.add(flashSphere);
+
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xfef08a,
+      transparent: true,
+      opacity: 0.95,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const ring = new THREE.Mesh(this.unitRingGeo, ringMat);
+    ring.position.y = 0.14;
+    ring.scale.setScalar(0.4);
+    group.add(ring);
+
+    this.triggerFlashLight(pos, 0xffffff, 14, 24, 0.28);
+
+    this.addEffect(group, 0.34, (_dt, p) => {
+      const easeOut = 1 - Math.pow(1 - p, 2.6);
+      flashSphere.scale.setScalar(0.45 + easeOut * 3.2);
+      flashMat.opacity = 0.98 * Math.pow(1 - p, 1.5);
+      ring.scale.setScalar(0.4 + easeOut * 8.6);
+      ringMat.opacity = 0.95 * (1 - p);
+    });
+
+    const sparkPalette = [0xffffff, 0xfef08a, 0xfde047];
+    for (let i = 0; i < 22; i++) {
+      const theta = (i / 22) * Math.PI * 2 + (Math.random() - 0.5) * 0.25;
+      const spd = 6.5 + Math.random() * 7.5;
+      const vel = new THREE.Vector3(
+        Math.cos(theta) * spd,
+        2.5 + Math.random() * 6.5,
+        Math.sin(theta) * spd
+      );
+      this.spawnSpark(
+        pos,
+        vel,
+        sparkPalette[i % sparkPalette.length],
+        0.34 + Math.random() * 0.2,
+        1.35 + Math.random() * 0.45,
+        0.06,
+        14
+      );
+    }
+  }
+
+  /**
+   * Shield Drop — translucent Google-Blue/Cyan protective energy hemisphere
+   * with wireframe hex shimmer, glowing ground perimeter ring & rotating shield beacon pulse.
+   */
+  public createShieldDropDome(
+    pos: THREE.Vector3,
+    radius: number,
+    colorHex = 0x38bdf8
+  ): PersistentZoneVisual {
+    const group = new THREE.Group();
+    group.position.copy(pos);
+
+    // Protective energy hemisphere
+    const domeGeo = new THREE.SphereGeometry(radius, 28, 16, 0, Math.PI * 2, 0, Math.PI * 0.52);
+    const domeMat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity: 0.24,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const dome = new THREE.Mesh(domeGeo, domeMat);
+    group.add(dome);
+
+    // Subtle wireframe hex shimmer
+    const wireMat = new THREE.MeshBasicMaterial({
+      color: 0xbae6fd,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.26,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const wire = new THREE.Mesh(domeGeo, wireMat);
+    wire.scale.setScalar(1.004);
+    group.add(wire);
+
+    // Glowing ground perimeter ring
+    const groundMat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const groundRing = new THREE.Mesh(this.unitRingGeo, groundMat);
+    groundRing.scale.setScalar(radius);
+    groundRing.position.y = 0.09;
+    group.add(groundRing);
+
+    // Rotating shield beacon pulse band
+    const bandGeo = new THREE.TorusGeometry(radius * 0.84, 0.06, 8, 48);
+    const bandMat = new THREE.MeshBasicMaterial({
+      color: 0x7dd3fc,
+      transparent: true,
+      opacity: 0.78,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const beaconBand = new THREE.Mesh(bandGeo, bandMat);
+    beaconBand.rotation.x = Math.PI / 2;
+    beaconBand.position.y = radius * 0.42;
+    group.add(beaconBand);
+
+    // Central ground emitter glow
+    const coreMat = new THREE.MeshBasicMaterial({
+      color: 0xe0f2fe,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const core = new THREE.Mesh(this.lowSphereGeo, coreMat);
+    core.position.y = 0.24;
+    core.scale.setScalar(0.32);
+    group.add(core);
+
+    this.scene.add(group);
+    this.triggerFlashLight(pos.clone().add(new THREE.Vector3(0, 1.8, 0)), colorHex, 8, radius * 2.6, 0.36);
+
+    return {
+      group,
+      update: (dt, elapsed, remaining) => {
+        const fade = remaining < 0.65 ? Math.max(0, remaining / 0.65) : 1;
+        const shimmer = 0.86 + Math.sin(elapsed * 4.8) * 0.14;
+        domeMat.opacity = 0.24 * shimmer * fade;
+        wireMat.opacity = (0.22 + Math.sin(elapsed * 6.2) * 0.06) * fade;
+        groundMat.opacity = 0.8 * fade;
+
+        wire.rotation.y += dt * 0.24;
+        beaconBand.rotation.z += dt * 1.1;
+        const pulsePhase = (elapsed * 0.65) % 1;
+        const bandH = 0.2 + pulsePhase * (radius * 0.78);
+        const bandR = Math.sqrt(Math.max(0.25, radius * radius - bandH * bandH)) / (radius * 0.84);
+        beaconBand.position.y = bandH;
+        beaconBand.scale.setScalar(Math.max(0.2, bandR));
+        bandMat.opacity = 0.78 * Math.sin(pulsePhase * Math.PI) * fade;
+
+        core.scale.setScalar(0.28 + Math.sin(elapsed * 7.5) * 0.06);
+        coreMat.opacity = 0.85 * fade;
+      },
+      dispose: () => {
+        this.scene.remove(group);
+        domeGeo.dispose();
+        domeMat.dispose();
+        wireMat.dispose();
+        groundMat.dispose();
+        bandGeo.dispose();
+        bandMat.dispose();
+        coreMat.dispose();
+      },
+    };
+  }
+
+  /**
+   * Regeneration Pod — warm luminous Google-Green healing pulse ring,
+   * soft vertical emerald aura cylinder & gently rising healing motes.
+   */
+  public createRegenPodAura(pos: THREE.Vector3, radius: number): PersistentZoneVisual {
+    const group = new THREE.Group();
+    group.position.copy(pos);
+
+    // Outer luminous Google-Green ground ring
+    const outerRingMat = new THREE.MeshBasicMaterial({
+      color: 0x34a853,
+      transparent: true,
+      opacity: 0.82,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const outerRing = new THREE.Mesh(this.unitRingGeo, outerRingMat);
+    outerRing.scale.setScalar(radius);
+    outerRing.position.y = 0.09;
+    group.add(outerRing);
+
+    // Pulsing inner emerald wave ring
+    const pulseRingMat = new THREE.MeshBasicMaterial({
+      color: 0x6ee7b7,
+      transparent: true,
+      opacity: 0.72,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const pulseRing = new THREE.Mesh(this.unitRingGeo, pulseRingMat);
+    pulseRing.scale.setScalar(0.4);
+    pulseRing.position.y = 0.12;
+    group.add(pulseRing);
+
+    // Soft vertical emerald aura cylinder
+    const auraHeight = 2.8;
+    const auraGeo = new THREE.CylinderGeometry(radius * 0.96, radius, auraHeight, 28, 1, true);
+    const auraMat = new THREE.MeshBasicMaterial({
+      color: 0x34a853,
+      transparent: true,
+      opacity: 0.14,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const auraCylinder = new THREE.Mesh(auraGeo, auraMat);
+    auraCylinder.position.y = auraHeight * 0.5;
+    group.add(auraCylinder);
+
+    // Gently rising healing motes
+    const moteMat = new THREE.MeshBasicMaterial({
+      color: 0x86efac,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const motes: { mesh: THREE.Mesh; angle: number; dist: number; phase: number; speed: number }[] = [];
+    const moteCount = 14;
+    for (let i = 0; i < moteCount; i++) {
+      const angle = (i / moteCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.35;
+      const dist = radius * (0.2 + Math.random() * 0.72);
+      const phase = Math.random();
+      const speed = 0.38 + Math.random() * 0.28;
+      const mote = new THREE.Mesh(this.sparkGeo, moteMat);
+      mote.position.set(Math.cos(angle) * dist, 0.2 + phase * 2.4, Math.sin(angle) * dist);
+      mote.scale.setScalar(0.85);
+      group.add(mote);
+      motes.push({ mesh: mote, angle, dist, phase, speed });
+    }
+
+    this.scene.add(group);
+    this.triggerFlashLight(pos.clone().add(new THREE.Vector3(0, 1.4, 0)), 0x34a853, 7, radius * 2.4, 0.38);
+
+    return {
+      group,
+      update: (dt, elapsed, remaining) => {
+        const fade = remaining < 0.65 ? Math.max(0, remaining / 0.65) : 1;
+        const breathe = 0.84 + Math.sin(elapsed * 4.2) * 0.16;
+        outerRingMat.opacity = 0.82 * breathe * fade;
+        auraMat.opacity = 0.14 * breathe * fade;
+        auraCylinder.rotation.y += dt * 0.3;
+
+        const wave = (elapsed * 0.85) % 1;
+        pulseRing.scale.setScalar(Math.max(0.25, radius * (0.15 + wave * 0.88)));
+        pulseRingMat.opacity = 0.72 * (1 - wave) * fade;
+
+        moteMat.opacity = 0.85 * fade;
+        for (const m of motes) {
+          m.phase = (m.phase + dt * m.speed) % 1;
+          m.angle += dt * 0.32;
+          const y = 0.18 + m.phase * 2.65;
+          m.mesh.position.set(Math.cos(m.angle) * m.dist, y, Math.sin(m.angle) * m.dist);
+          m.mesh.rotation.y += dt * 3.0;
+          const scale = Math.sin(m.phase * Math.PI) * 1.1;
+          m.mesh.scale.setScalar(Math.max(0.05, scale));
+        }
+      },
+      dispose: () => {
+        this.scene.remove(group);
+        outerRingMat.dispose();
+        pulseRingMat.dispose();
+        auraGeo.dispose();
+        auraMat.dispose();
+        moteMat.dispose();
+      },
+    };
+  }
+
   /** Gmail Ultimate homing explosive envelope missile visual. */
   public createGmailEnvelopeMissile(): THREE.Group {
     const group = new THREE.Group();

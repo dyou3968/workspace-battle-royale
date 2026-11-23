@@ -408,6 +408,10 @@ export const UTILITY_ASSET_PATHS: Record<UtilityItemId, string> = {
   mana_elixir: '/assets/utilities/item_mana_elixir.glb',
   hardlight_cover: '/assets/utilities/item_hardlight_cover.glb',
   impulse_booster: '/assets/utilities/item_impulse_booster.glb',
+  frag_grenade: '/assets/utilities/item_frag_grenade.glb',
+  flashbang: '/assets/utilities/item_flashbang.glb',
+  shield_drop: '/assets/utilities/item_shield_drop.glb',
+  regen_pod: '/assets/utilities/item_regen_pod.glb',
 };
 
 export const PROP_ASSET_PATHS: Record<PropAssetId, string> = {

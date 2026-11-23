@@ -34,6 +34,7 @@ export interface BotCombatantSnapshot {
   crouching: boolean;
   channeling: boolean;
   silencedSec: number;
+  blindedSec: number;
   ultCooldown: number;
   slots: (InventorySlot | null)[];
   activeSlot: number;
@@ -125,7 +126,11 @@ export const BOT_UTILITY_SWAP_HYSTERESIS = 8;
 const BOT_UTILITY_BASE_VALUE: Record<UtilityItemId, number> = {
   shield_jug: 38,
   medkit: 36,
+  shield_drop: 34,
+  regen_pod: 34,
   shield_cell: 30,
+  frag_grenade: 28,
+  flashbang: 24,
   hardlight_cover: 22,
   impulse_booster: 18,
   mana_elixir: 16,
@@ -492,6 +497,8 @@ export class BotBrain {
   private burstActiveTimer = 0.8;
   private hardlightCooldown = 0;
   private impulseCooldown = 0;
+  private grenadeCooldown = 0;
+  private deployableCooldown = 0;
 
   private readonly tmpFrom = new THREE.Vector3();
   private readonly tmpTo = new THREE.Vector3();
@@ -530,6 +537,8 @@ export class BotBrain {
     this.coverTimer = Math.max(0, this.coverTimer - dt);
     this.hardlightCooldown = Math.max(0, this.hardlightCooldown - dt);
     this.impulseCooldown = Math.max(0, this.impulseCooldown - dt);
+    this.grenadeCooldown = Math.max(0, this.grenadeCooldown - dt);
+    this.deployableCooldown = Math.max(0, this.deployableCooldown - dt);
     this.burstCooldown = Math.max(0, this.burstCooldown - dt);
     this.burstActiveTimer -= dt;
     this.unstuckHoldTimer = Math.max(0, this.unstuckHoldTimer - dt);
@@ -813,6 +822,19 @@ export class BotBrain {
       return;
     }
 
+    // Deploy Shield Drop or Regen Pod when hurt behind cover (or no LOS)
+    if (this.deployableCooldown <= 0 && self.silencedSec <= 0 && (!threat || !threatHasLos)) {
+      const shieldDropSlot = self.shield < 72 ? this.findItemSlot(self, 'shield_drop') : -1;
+      const regenPodSlot = self.health < 78 ? this.findItemSlot(self, 'regen_pod') : -1;
+      const chosenDeploy = shieldDropSlot !== -1 ? shieldDropSlot : regenPodSlot;
+      if (chosenDeploy !== -1) {
+        decision.desiredSlot = chosenDeploy;
+        decision.useItem = true;
+        this.deployableCooldown = 10.5;
+        return;
+      }
+    }
+
     // Casual heals right in place without seeking cover
     if (!this.profile.healInCover || !threat || !threatHasLos) {
       if (healSlot !== -1 && self.silencedSec <= 0) {
@@ -903,6 +925,79 @@ export class BotBrain {
       return;
     }
     decision.desiredSlot = bestWeaponSlot;
+
+    // Flashbang blindness reaction: suppress accurate aiming & firing, back up/weave blindly
+    if (self.blindedSec > 0.1) {
+      const rx = self.pos.x - target.pos.x;
+      const rz = self.pos.z - target.pos.z;
+      const rLen = Math.max(0.01, Math.hypot(rx, rz));
+      const awayX = rx / rLen;
+      const awayZ = rz / rLen;
+      const perpX = -awayZ * this.strafeDir * 0.7;
+      const perpZ = awayX * this.strafeDir * 0.7;
+      const bLen = Math.max(0.01, Math.hypot(awayX + perpX, awayZ + perpZ));
+      decision.moveX = (awayX + perpX) / bLen;
+      decision.moveZ = (awayZ + perpZ) / bLen;
+      decision.sprint = false;
+      decision.crouch = false;
+      const blindYaw = self.yaw + gaussianApprox() * 1.15;
+      decision.aimYaw = blindYaw;
+      this.tmpAim.set(
+        self.pos.x - Math.sin(blindYaw) * 14,
+        self.pos.y + 1.1 + gaussianApprox() * 2.8,
+        self.pos.z - Math.cos(blindYaw) * 14
+      );
+      decision.aimTargetPoint = this.tmpAim.clone();
+      // Occasional panicked inaccurate spray only when very close
+      decision.fire = dist < 14 && Math.random() < 0.16;
+      return;
+    }
+
+    // Tactical grenade throw (Frag Grenade or Flashbang) at mid-range enemies (10-26m)
+    if (
+      this.grenadeCooldown <= 0 &&
+      self.silencedSec <= 0 &&
+      dist >= 10 &&
+      dist <= 26 &&
+      Math.random() < world.dt * (this.profile.tier === 'pro' ? 0.55 : this.profile.tier === 'tactical' ? 0.35 : 0.18)
+    ) {
+      const fragSlot = this.findItemSlot(self, 'frag_grenade');
+      const flashSlot = this.findItemSlot(self, 'flashbang');
+      const throwSlot =
+        fragSlot !== -1 && flashSlot !== -1
+          ? Math.random() < 0.55
+            ? fragSlot
+            : flashSlot
+          : fragSlot !== -1
+            ? fragSlot
+            : flashSlot;
+      if (throwSlot !== -1) {
+        decision.desiredSlot = throwSlot;
+        decision.aimYaw = yawToward(self.pos.x, self.pos.z, target.pos.x, target.pos.z);
+        this.tmpAim.set(target.pos.x, target.pos.y + 1.0, target.pos.z);
+        decision.aimTargetPoint = this.tmpAim.clone();
+        decision.useItem = true;
+        this.grenadeCooldown = 5.5;
+        return;
+      }
+    }
+
+    // Sudden-fire Shield Drop or Hard-Light Cover reaction for Tactical/Pro bots
+    const shieldDropCombatSlot = this.findItemSlot(self, 'shield_drop');
+    if (
+      shieldDropCombatSlot !== -1 &&
+      this.deployableCooldown <= 0 &&
+      self.silencedSec <= 0 &&
+      self.shield < 55 &&
+      world.time - self.lastDamagedAt < 1.2 &&
+      Math.random() < this.profile.deployHardlightChance * 0.5
+    ) {
+      decision.desiredSlot = shieldDropCombatSlot;
+      decision.aimYaw = yawToward(self.pos.x, self.pos.z, target.pos.x, target.pos.z);
+      decision.useItem = true;
+      this.deployableCooldown = 11.0;
+      return;
+    }
 
     // Sudden-fire Hard-Light Cover reaction for Tactical/Pro bots
     const coverSlot = this.findItemSlot(self, 'hardlight_cover');
@@ -1474,14 +1569,18 @@ export class BotBrain {
   }
 
   private findBestHealSlot(self: BotCombatantSnapshot): number {
-    // Priority: Medkit if HP low -> Shield Jug if Shield very low -> Shield Cell -> Mana Elixir
+    // Priority: Medkit / Regen Pod if HP low -> Shield Jug / Shield Drop if Shield low -> Shield Cell -> Mana Elixir
     if (self.health < 68) {
       const mk = this.findItemSlot(self, 'medkit');
       if (mk !== -1) return mk;
+      const rp = this.findItemSlot(self, 'regen_pod');
+      if (rp !== -1) return rp;
     }
     if (self.shield < 45) {
       const jug = this.findItemSlot(self, 'shield_jug');
       if (jug !== -1) return jug;
+      const sd = this.findItemSlot(self, 'shield_drop');
+      if (sd !== -1) return sd;
     }
     if (self.shield < 82) {
       const cell = this.findItemSlot(self, 'shield_cell');
@@ -1490,6 +1589,8 @@ export class BotBrain {
     if (self.health < 88) {
       const mk = this.findItemSlot(self, 'medkit');
       if (mk !== -1) return mk;
+      const rp = this.findItemSlot(self, 'regen_pod');
+      if (rp !== -1) return rp;
     }
     if (self.mana < 65) {
       const mana = this.findItemSlot(self, 'mana_elixir');

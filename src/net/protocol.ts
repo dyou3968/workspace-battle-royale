@@ -30,7 +30,11 @@ export type MpUtilityItemId =
   | 'medkit'
   | 'mana_elixir'
   | 'hardlight_cover'
-  | 'impulse_booster';
+  | 'impulse_booster'
+  | 'frag_grenade'
+  | 'flashbang'
+  | 'shield_drop'
+  | 'regen_pod';
 
 export type MpRarity = 'common' | 'rare' | 'epic';
 export type MpChestTier = 1 | 2 | 3;
@@ -258,6 +262,18 @@ export interface UltCastEvent {
   targetZ?: number;
 }
 
+export interface UtilityThrowEvent {
+  ownerId: string;
+  itemId: 'frag_grenade' | 'flashbang' | 'shield_drop' | 'regen_pod';
+  rarity: MpRarity;
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+}
+
 export interface DamageEvent {
   targetId: string;
   attackerId: string | null;
@@ -382,6 +398,10 @@ export type ClientMessage =
   | {
       type: 'ult_cast';
       event: UltCastEvent;
+    }
+  | {
+      type: 'utility_throw';
+      event: UtilityThrowEvent;
     }
   | {
       type: 'chest_open';
@@ -510,6 +530,10 @@ export type ServerMessage =
   | {
       type: 'ult_cast';
       event: UltCastEvent;
+    }
+  | {
+      type: 'utility_throw';
+      event: UtilityThrowEvent;
     }
   | {
       type: 'chest_opened';

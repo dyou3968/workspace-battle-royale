@@ -49,7 +49,7 @@
               <div id="splash-preload-fill" class="splash-preload-fill"></div>
             </div>
             <div class="splash-preload-meta">
-              <span id="splash-preload-caption" class="splash-preload-caption">Loading Mountain View Campus · 0/53</span>
+              <span id="splash-preload-caption" class="splash-preload-caption">Loading Mountain View Campus · 0/57</span>
               <span id="splash-preload-pct" class="splash-preload-pct">0%</span>
             </div>
           </div>
@@ -799,6 +799,10 @@
                             <span class="ws-keycap">M</span>
                           </div>
                           <div class="keybind-row">
+                            <span class="keybind-action">Toggle Spectate Free Cam / Follow</span>
+                            <span class="ws-keycap">F</span>
+                          </div>
+                          <div class="keybind-row">
                             <span class="keybind-action">Pause / Back</span>
                             <span class="ws-keycap">Esc</span>
                           </div>
@@ -1103,10 +1107,11 @@
           </div>
         </div>
 
-        <!-- Screen-edge Status Vignettes -->
+        <!-- Screen-edge Status Vignettes & Flashbang Whiteout -->
         <div id="storm-vignette" class="storm-vignette hidden"></div>
         <div id="low-hp-vignette" class="low-hp-vignette hidden"></div>
         <div id="shield-shatter-vignette" class="shield-shatter-vignette" aria-hidden="true"></div>
+        <div id="flashbang-overlay" class="flashbang-overlay" aria-hidden="true"></div>
 
         <!-- TOP LEFT: Authentic 2D Googleplex Minimap, Storm Status & Perf Telemetry -->
         <div class="hud-top-left">
@@ -1277,18 +1282,21 @@
           <div class="hotbar" id="hotbar"></div>
         </div>
 
-        <!-- LIVE SPECTATE HUD BAR (Multiplayer Spectate Mode) -->
+        <!-- LIVE SPECTATE HUD BAR (Follow Player / Free-Form Drone Cam) -->
         <div id="spectate-bar" class="spectate-bar hidden" role="region" aria-label="Spectate Controls">
           <div class="spectate-meta">
-            <span class="spectate-badge">SPECTATING</span>
+            <span id="spectate-mode-badge" class="spectate-badge">FOLLOW CAM</span>
             <div class="spectate-target-info">
               <span id="spectate-target-name" class="spectate-target-name">Player · Gmail AI</span>
               <span id="spectate-target-vitals" class="spectate-target-vitals">HP 100 · SHD 0</span>
             </div>
           </div>
           <div class="spectate-controls">
-            <button type="button" id="btn-spectate-prev" class="spectate-btn" title="Previous Player">‹ Prev</button>
-            <button type="button" id="btn-spectate-next" class="spectate-btn" title="Next Player">Next ›</button>
+            <div id="spectate-follow-controls" class="spectate-follow-controls">
+              <button type="button" id="btn-spectate-prev" class="spectate-btn" title="Previous Player">‹ Prev</button>
+              <button type="button" id="btn-spectate-next" class="spectate-btn" title="Next Player">Next ›</button>
+            </div>
+            <button type="button" id="btn-spectate-mode" class="spectate-btn spectate-mode-btn" title="Toggle Free Cam / Follow Cam [F]" aria-pressed="false">Free Cam [F]</button>
             <button type="button" id="btn-spectate-lobby" class="spectate-btn spectate-btn-exit">Return to Room</button>
           </div>
         </div>

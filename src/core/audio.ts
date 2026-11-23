@@ -300,6 +300,71 @@ export class SoundEngine {
     this.playNoise('bandpass', 2400, 420, 1.0, 0.22, 0.28 * atten, 0.02, pan);
   }
 
+  /** Crisp fast arc-throw swoosh + metallic pin click for throwable utilities. */
+  public playGrenadeThrow(): void {
+    // Crisp metallic pin pull / safety lever click
+    this.playNoise('highpass', 4200, 2400, 3.2, 0.028, 0.16, 0);
+    this.playTone('square', 1380, 920, 0.024, 0.09, 0.005);
+    // Fast arc-throw air swoosh
+    this.playNoise('bandpass', 720, 2250, 1.35, 0.17, 0.28, 0.025);
+    this.playTone('triangle', 260, 115, 0.14, 0.16, 0.03);
+  }
+
+  /** Metallic clink-bounce scaled by distance and stereo pan. */
+  public playGrenadeBounce(distance = 0, pan = 0): void {
+    const atten = this.spatialGain(distance, 68);
+    if (atten <= 0.015) return;
+    this.playTone('sine', 1640, 1480, 0.085, 0.2 * atten, 0, pan);
+    this.playTone('triangle', 2620, 2240, 0.065, 0.13 * atten, 0.004, pan);
+    this.playNoise('highpass', 3600, 1900, 2.6, 0.032, 0.15 * atten, 0, pan);
+    this.playTone('sine', 210, 95, 0.055, 0.14 * atten, 0, pan);
+  }
+
+  /** Sharp flashbang concussion crack + smooth subtle 3100 Hz stun ring fading over 1.4s. */
+  public playFlashbang(blindIntensity: number, distance = 0, pan = 0): void {
+    const clampedBlind = Math.max(0, Math.min(1, Number.isFinite(blindIntensity) ? blindIntensity : 0));
+    const atten = Math.max(this.spatialGain(distance, 120), clampedBlind * 0.85);
+    if (atten <= 0.015) return;
+
+    // Sharp concussion crack + bright high-frequency pop
+    this.playNoise('highpass', 3200, 900, 0.9, 0.16, 0.54 * atten, 0, pan);
+    this.playNoise('bandpass', 1800, 380, 0.85, 0.28, 0.42 * atten, 0.01, pan);
+    this.playTone('sine', 190, 44, 0.22, 0.48 * atten, 0, pan);
+
+    // Smooth high-pitched stun ring (~3100 Hz sine fading gracefully over 1.4s, subtle volume)
+    if (clampedBlind > 0.08) {
+      this.playTone('sine', 3100, 3050, 1.4, 0.075 * clampedBlind, 0.03, 0);
+    }
+  }
+
+  /** Sci-fi resonant shield dome expansion hum + crisp shield chime. */
+  public playShieldDropDeploy(distance = 0, pan = 0): void {
+    const atten = this.spatialGain(distance, 95);
+    if (atten <= 0.015) return;
+    // Resonant dome expansion hum
+    this.playTone('sine', 150, 360, 0.42, 0.3 * atten, 0, pan);
+    this.playTone('triangle', 280, 560, 0.36, 0.2 * atten, 0.04, pan);
+    this.playNoise('bandpass', 900, 2600, 1.8, 0.32, 0.18 * atten, 0.02, pan);
+    // Crisp crystalline shield chime
+    this.playTone('sine', 587.33, 592, 0.22, 0.2 * atten, 0.08, pan);
+    this.playTone('triangle', 880, 886, 0.26, 0.18 * atten, 0.14, pan);
+    this.playTone('sine', 1174.66, 1185, 0.34, 0.18 * atten, 0.2, pan);
+  }
+
+  /** Warm ascending emerald healing beacon chime for Regeneration Pod deployment. */
+  public playRegenPodDeploy(distance = 0, pan = 0): void {
+    const atten = this.spatialGain(distance, 85);
+    if (atten <= 0.015) return;
+    // Gentle pod anchor thump + airy shimmer
+    this.playTone('sine', 165, 82, 0.14, 0.22 * atten, 0, pan);
+    this.playNoise('bandpass', 1400, 2800, 2.2, 0.24, 0.12 * atten, 0.03, pan);
+    // Warm ascending emerald healing chime (C5 -> E5 -> G5 -> C6)
+    this.playTone('sine', 523.25, 526, 0.2, 0.2 * atten, 0.04, pan);
+    this.playTone('sine', 659.25, 663, 0.22, 0.21 * atten, 0.12, pan);
+    this.playTone('triangle', 783.99, 789, 0.26, 0.2 * atten, 0.2, pan);
+    this.playTone('sine', 1046.5, 1054, 0.38, 0.22 * atten, 0.28, pan);
+  }
+
   public playPickup(rarity: Rarity = 'common'): void {
     const base = rarity === 'epic' ? 660 : rarity === 'rare' ? 540 : 440;
     this.playTone('sine', base, base * 1.25, 0.09, 0.18, 0);

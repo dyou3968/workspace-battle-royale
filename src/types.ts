@@ -35,7 +35,13 @@ export type UtilityItemId =
   | 'medkit'
   | 'mana_elixir'
   | 'hardlight_cover'
-  | 'impulse_booster';
+  | 'impulse_booster'
+  | 'frag_grenade'
+  | 'flashbang'
+  | 'shield_drop'
+  | 'regen_pod';
+
+export type SpectateMode = 'follow' | 'free';
 
 export type PropAssetId =
   | 'supply_drop'
@@ -462,6 +468,7 @@ export interface HudSnapshot {
   waypointDist?: number | null;
   pointerLocked: boolean;
   matchPhase: 'lobby' | 'skydrop' | 'playing' | 'ended';
+  flashBlindAlpha?: number;
   multiplayer?: {
     active: boolean;
     roomCode: string;
@@ -478,6 +485,9 @@ export interface HudSnapshot {
     health: number;
     shield: number;
     teamId: 'blue' | 'red' | 'yellow' | 'green' | null;
+    mode?: SpectateMode;
+    altitude?: number;
+    zoneName?: string;
   } | null;
 }
 

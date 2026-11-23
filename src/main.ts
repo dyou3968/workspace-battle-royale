@@ -333,11 +333,15 @@ const mpWaitingHostNote = document.getElementById('mp-waiting-host-note')!;
 
 const hudMpPill = document.getElementById('hud-mp-pill')!;
 const legendTeammate = document.getElementById('legend-teammate')!;
+const flashbangOverlay = document.getElementById('flashbang-overlay')!;
 const spectateBar = document.getElementById('spectate-bar')!;
+const spectateModeBadge = document.getElementById('spectate-mode-badge')!;
 const spectateTargetName = document.getElementById('spectate-target-name')!;
 const spectateTargetVitals = document.getElementById('spectate-target-vitals')!;
+const spectateFollowControls = document.getElementById('spectate-follow-controls')!;
 const btnSpectatePrev = document.getElementById('btn-spectate-prev') as HTMLButtonElement;
 const btnSpectateNext = document.getElementById('btn-spectate-next') as HTMLButtonElement;
+const btnSpectateMode = document.getElementById('btn-spectate-mode') as HTMLButtonElement;
 const btnSpectateLobby = document.getElementById('btn-spectate-lobby') as HTMLButtonElement;
 
 const goTeamRow = document.getElementById('go-team-row')!;
@@ -569,6 +573,10 @@ const UTILITY_SVGS: Record<UtilityItemId, string> = {
   mana_elixir: `<svg viewBox="0 0 32 24" fill="none" stroke="#C58AF9" stroke-width="2" stroke-linejoin="round"><path d="M13 3h6v4l5 9a3 3 0 0 1-2.6 4.5H10.6A3 3 0 0 1 8 16l5-9V3z"/><path d="M10.5 15h11"/></svg>`,
   hardlight_cover: `<svg viewBox="0 0 32 24" fill="none" stroke="#8AB4F8" stroke-width="2" stroke-linecap="round"><path d="M6 17c3-8 17-8 20 0"/><path d="M9 19c2.5-5 11.5-5 14 0"/><path d="M16 7v4"/></svg>`,
   impulse_booster: `<svg viewBox="0 0 32 24" fill="none" stroke="#FBBC04" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4l6 8h-4v8h-4v-8h-4l6-8z"/></svg>`,
+  frag_grenade: `<svg viewBox="0 0 32 24" fill="none" stroke="#EA4335" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="14" r="6.5"/><path d="M13 7.5V5h6v2.5"/><path d="M19 5l3 1.5v4"/><path d="M10.5 14h11M16 8.5v11"/></svg>`,
+  flashbang: `<svg viewBox="0 0 32 24" fill="none" stroke="#FEF08A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="7" width="8" height="12" rx="2"/><path d="M14 7V4.5h4V7"/><path d="M6 12h3M23 12h3M8 7l2 1.5M24 7l-2 1.5M8 17l2-1.5M24 17l-2-1.5"/></svg>`,
+  shield_drop: `<svg viewBox="0 0 32 24" fill="none" stroke="#38BDF8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18a11 11 0 0 1 22 0z"/><path d="M10 18a6 6 0 0 1 12 0"/><path d="M16 11v7"/></svg>`,
+  regen_pod: `<svg viewBox="0 0 32 24" fill="none" stroke="#34A853" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="11" y="6" width="10" height="13" rx="3"/><path d="M16 9.5v6M13 12.5h6"/><path d="M8 19h16"/><path d="M13 6V4h6v2"/></svg>`,
 };
 
 // ==================== BRIGHT GOOGLE STUDIO 3D HERO SHOWCASE (SINGLE WEBGL CONTEXT) ====================
@@ -1538,6 +1546,7 @@ function resetCombatFeedbackUi(): void {
   critFlashEl.classList.remove('show');
   shieldBreakFlashEl.classList.remove('show');
   shieldShatterVignette.classList.remove('active');
+  flashbangOverlay.style.opacity = '0';
   clearSoundCompass();
 }
 
@@ -1740,24 +1749,47 @@ function renderHud(state: HudSnapshot): void {
     legendTeammate.classList.add('hidden');
   }
 
-  // Live Spectate Mode Bar
+  // Flashbang Whiteout Overlay
+  const blindAlpha = Math.max(0, Math.min(1, state.flashBlindAlpha ?? 0));
+  flashbangOverlay.style.opacity = blindAlpha > 0.005 ? String(blindAlpha) : '0';
+
+  // Live Spectate Mode Bar (Follow Cam & 6-DOF Free-Form Drone)
   if (state.spectating?.active) {
     hudEl.classList.add('is-spectating');
     spectateBar.classList.remove('hidden');
-    const targetHero = HERO_MAP[state.spectating.targetHeroId] ?? HERO_MAP.gmail;
-    const teamTag = state.spectating.teamId
-      ? ` [${TEAM_CONFIG[state.spectating.teamId].label}]`
-      : '';
-    setTextCached(
-      spectateTargetName,
-      `${state.spectating.targetName}${teamTag} · ${targetHero.personaName}`
-    );
-    setTextCached(
-      spectateTargetVitals,
-      `HP ${Math.max(0, state.spectating.health)} · SHD ${Math.max(0, state.spectating.shield)}`
-    );
+    const isFree = state.spectating.mode === 'free';
+    spectateBar.classList.toggle('is-free-cam', isFree);
+    btnSpectateMode.classList.toggle('is-active', isFree);
+    btnSpectateMode.setAttribute('aria-pressed', String(isFree));
+    setTextCached(spectateModeBadge, isFree ? 'FREE CAM' : 'FOLLOW CAM');
+    setTextCached(btnSpectateMode, isFree ? 'Follow Cam [F]' : 'Free Cam [F]');
+    spectateFollowControls.classList.toggle('hidden', isFree);
+    setTextCached(btnSpectateLobby, state.multiplayer?.active ? 'Return to Room' : 'Back to Home');
+
+    if (isFree) {
+      const zone = state.spectating.zoneName || state.spectating.targetName || 'Googleplex Campus';
+      setTextCached(spectateTargetName, zone);
+      setTextCached(
+        spectateTargetVitals,
+        `ALT ${Math.max(0, state.spectating.altitude ?? 0)}m · WASD Fly · Space/C Elev · Shift Boost`
+      );
+    } else {
+      const targetHero = HERO_MAP[state.spectating.targetHeroId] ?? HERO_MAP.gmail;
+      const teamTag = state.spectating.teamId
+        ? ` [${TEAM_CONFIG[state.spectating.teamId].label}]`
+        : '';
+      setTextCached(
+        spectateTargetName,
+        `${state.spectating.targetName}${teamTag} · ${targetHero.personaName}`
+      );
+      setTextCached(
+        spectateTargetVitals,
+        `HP ${Math.max(0, state.spectating.health)} · SHD ${Math.max(0, state.spectating.shield)}`
+      );
+    }
   } else {
     hudEl.classList.remove('is-spectating');
+    spectateBar.classList.remove('is-free-cam');
     spectateBar.classList.add('hidden');
   }
 
@@ -2098,7 +2130,7 @@ const hudCallbacks: Omit<HudCallbacks, 'onHitMarker'> & {
     pauseOverlay.classList.toggle('hidden', locked);
   },
   onMatchEnd: (summary: MatchSummary) => {
-    const isOngoingElim = Boolean(summary.isMultiplayer && summary.matchOngoing);
+    const isOngoingElim = Boolean(summary.matchOngoing);
     if (!isOngoingElim) {
       currentMatchPhase = 'ended';
     }
@@ -2140,7 +2172,7 @@ const hudCallbacks: Omit<HudCallbacks, 'onHitMarker'> & {
     // Toggle Solo vs Multiplayer gameover actions
     btnPlayAgain.classList.toggle('hidden', isMp);
     btnChangeHero.classList.toggle('hidden', isMp);
-    btnGameoverSpectate.classList.toggle('hidden', !(isMp && summary.matchOngoing === true));
+    btnGameoverSpectate.classList.toggle('hidden', summary.matchOngoing !== true);
     btnGameoverRoom.classList.toggle('hidden', !isMp);
     btnGameoverHome.classList.remove('hidden');
 
@@ -2885,7 +2917,7 @@ const preloadPromise: Promise<void> = engine
     assetPreloadBar.classList.add('ready');
     preloadPct.textContent = '100%';
     preloadFill.style.width = '100%';
-    const totalCount = lastPreloadTotal || 53;
+    const totalCount = lastPreloadTotal || 57;
     preloadLabel.textContent = `All ${totalCount} 3D Mountain View campus assets loaded`;
     assetStatusChip.classList.add('ready');
     assetChipText.textContent = `Ready · ${totalCount} assets`;
@@ -3171,7 +3203,17 @@ btnMpStartMatch.addEventListener('click', () => {
 // Live Spectate Bar Controls
 btnSpectatePrev.addEventListener('click', () => engine.cycleSpectateTarget(-1));
 btnSpectateNext.addEventListener('click', () => engine.cycleSpectateTarget(1));
-btnSpectateLobby.addEventListener('click', returnToMpRoomLobby);
+btnSpectateMode.addEventListener('click', () => {
+  engine.toggleSpectateMode();
+  btnSpectateMode.blur();
+});
+btnSpectateLobby.addEventListener('click', () => {
+  if (engine.isInMultiplayerMatch()) {
+    returnToMpRoomLobby();
+  } else {
+    returnToLobby('home');
+  }
+});
 
 // Pause & Game Over Actions
 document.getElementById('btn-resume')!.addEventListener('click', () => {

@@ -357,6 +357,38 @@ export class ThirdPersonCamera {
   }
 
   /**
+   * Free-form spectator drone camera: direct world position with smooth FOV lerp
+   * and zero spring-arm wall-snap jitter.
+   */
+  public updateFreeCam(
+    dt: number,
+    pos: THREE.Vector3,
+    yaw: number,
+    pitch: number,
+    boosting = false
+  ): void {
+    const targetFov = boosting ? 80 : 72;
+    this.currentFov += (targetFov - this.currentFov) * Math.min(1, dt * 10);
+    if (Math.abs(this.camera.fov - this.currentFov) > 0.01) {
+      this.camera.fov = this.currentFov;
+      this.camera.updateProjectionMatrix();
+    }
+
+    const clampedPitch = Math.max(-1.48, Math.min(1.48, pitch));
+    const cosPitch = Math.cos(clampedPitch);
+    const sinPitch = Math.sin(clampedPitch);
+    const sinYaw = Math.sin(yaw);
+    const cosYaw = Math.cos(yaw);
+
+    // Forward look vector from (yaw, pitch): yaw=0 faces -Z (North)
+    this.forward.set(-sinYaw * cosPitch, sinPitch, -cosYaw * cosPitch).normalize();
+
+    this.camera.position.copy(pos);
+    this.lookTarget.copy(pos).add(this.forward);
+    this.camera.lookAt(this.lookTarget);
+  }
+
+  /**
    * Returns exact world-space camera origin and normalized center-crosshair ray direction
    * for parallax-free third-person aiming.
    */

@@ -537,6 +537,9 @@ export class GameRoom extends DurableObject<Env> {
       case 'ult_cast':
         this.handleUltCast(ws, senderId, msg.event);
         break;
+      case 'utility_throw':
+        this.handleUtilityThrow(ws, senderId, msg.event);
+        break;
       case 'chest_open':
         this.handleChestOpen(senderId, msg);
         break;
@@ -1187,6 +1190,43 @@ export class GameRoom extends DurableObject<Env> {
             typeof event.targetZ === 'number' && Number.isFinite(event.targetZ)
               ? event.targetZ
               : undefined,
+        },
+      },
+      ws
+    );
+  }
+
+  private handleUtilityThrow(
+    ws: WebSocket,
+    senderId: string,
+    event: Extract<ClientMessage, { type: 'utility_throw' }>['event']
+  ): void {
+    if (this.phase !== 'playing' || !this.match || !event || typeof event !== 'object') return;
+    const ownerId = this.resolveAuthorizedActorId(senderId, event.ownerId);
+    if (!ownerId) return;
+    if (
+      event.itemId !== 'frag_grenade' &&
+      event.itemId !== 'flashbang' &&
+      event.itemId !== 'shield_drop' &&
+      event.itemId !== 'regen_pod'
+    ) {
+      return;
+    }
+    if (!isValidRarity(event.rarity)) return;
+
+    this.broadcast(
+      {
+        type: 'utility_throw',
+        event: {
+          ownerId,
+          itemId: event.itemId,
+          rarity: event.rarity,
+          x: finiteOrZero(event.x),
+          y: finiteOrZero(event.y),
+          z: finiteOrZero(event.z),
+          vx: clampFinite(event.vx, -60, 60, 0),
+          vy: clampFinite(event.vy, -60, 60, 0),
+          vz: clampFinite(event.vz, -60, 60, 0),
         },
       },
       ws

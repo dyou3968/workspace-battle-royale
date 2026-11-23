@@ -537,6 +537,66 @@ export const UTILITY_ITEMS: Record<UtilityItemId, UtilityItemDef> = {
     color: 0xfacc15,
     assetPath: '/assets/utilities/item_impulse_booster.glb',
   },
+  frag_grenade: {
+    id: 'frag_grenade',
+    name: 'Frag Grenade',
+    shortName: 'Frag',
+    utilityCategory: 'tactical',
+    icon: 'FG',
+    category: 'item',
+    description: 'High-explosive fragmentation grenade with bouncing arc and blast radius (instant throw).',
+    baseAmount: 85,
+    amountsByRarity: { common: 85, rare: 105, epic: 130 },
+    channelTime: 0,
+    maxStack: 3,
+    color: 0xea4335,
+    assetPath: '/assets/utilities/item_frag_grenade.glb',
+  },
+  flashbang: {
+    id: 'flashbang',
+    name: 'Flashbang',
+    shortName: 'Flash',
+    utilityCategory: 'tactical',
+    icon: 'FB',
+    category: 'item',
+    description: 'Concussion flash grenade that blinds and disorients rivals caught in the blast (instant throw).',
+    baseAmount: 2.2,
+    amountsByRarity: { common: 2.2, rare: 2.8, epic: 3.4 },
+    channelTime: 0,
+    maxStack: 3,
+    color: 0xfef08a,
+    assetPath: '/assets/utilities/item_flashbang.glb',
+  },
+  shield_drop: {
+    id: 'shield_drop',
+    name: 'Shield Drop',
+    shortName: 'Shield Dome',
+    utilityCategory: 'shield',
+    icon: 'SD',
+    category: 'item',
+    description: 'Throwable protective shield dome that blocks enemy fire and restores Shield inside (instant throw).',
+    baseAmount: 8,
+    amountsByRarity: { common: 8, rare: 11, epic: 15 },
+    channelTime: 0,
+    maxStack: 2,
+    color: 0x38bdf8,
+    assetPath: '/assets/utilities/item_shield_drop.glb',
+  },
+  regen_pod: {
+    id: 'regen_pod',
+    name: 'Regeneration Pod',
+    shortName: 'Regen Pod',
+    utilityCategory: 'health',
+    icon: 'RP',
+    category: 'item',
+    description: 'Throwable healing beacon that pulses continuous emerald Health regeneration in an area (instant throw).',
+    baseAmount: 10,
+    amountsByRarity: { common: 10, rare: 13, epic: 17 },
+    channelTime: 0,
+    maxStack: 2,
+    color: 0x34a853,
+    assetPath: '/assets/utilities/item_regen_pod.glb',
+  },
 };
 
 export const UTILITY_LIST: UtilityItemDef[] = Object.values(UTILITY_ITEMS);
@@ -776,33 +836,47 @@ function rollShieldItem(tier: ChestTier): UtilityItemId {
 function rollSupportUtility(tier: ChestTier, excludeShield = false): UtilityItemId {
   if (excludeShield) {
     const r = Math.random();
-    if (r < (tier === 3 ? 0.40 : 0.32)) return 'mana_elixir';
-    if (r < 0.64) return 'medkit';
-    if (r < 0.83) return 'hardlight_cover';
+    if (r < (tier === 3 ? 0.22 : 0.18)) return 'mana_elixir';
+    if (r < 0.36) return 'medkit';
+    if (r < 0.48) return 'regen_pod';
+    if (r < 0.64) return 'frag_grenade';
+    if (r < 0.76) return 'flashbang';
+    if (r < 0.88) return 'hardlight_cover';
     return 'impulse_booster';
   }
   const r = Math.random();
-  if (r < 0.30) return 'shield_cell';
-  if (r < 0.44) return 'shield_jug';
-  if (r < 0.62) return 'medkit';
-  if (r < 0.77) return 'mana_elixir';
-  if (r < 0.90) return 'hardlight_cover';
+  if (r < 0.22) return 'shield_cell';
+  if (r < 0.33) return 'shield_jug';
+  if (r < 0.41) return 'shield_drop';
+  if (r < 0.54) return 'medkit';
+  if (r < 0.62) return 'regen_pod';
+  if (r < 0.72) return 'mana_elixir';
+  if (r < 0.82) return 'frag_grenade';
+  if (r < 0.88) return 'flashbang';
+  if (r < 0.94) return 'hardlight_cover';
   return 'impulse_booster';
 }
 
 function rollSniperSupportUtility(tier: ChestTier, excludeShield = false): UtilityItemId {
   const r = Math.random();
   if (excludeShield) {
-    if (r < 0.36) return 'impulse_booster';
-    if (r < 0.64) return 'hardlight_cover';
-    if (r < 0.90) return 'medkit';
+    if (r < 0.26) return 'impulse_booster';
+    if (r < 0.44) return 'hardlight_cover';
+    if (r < 0.59) return 'medkit';
+    if (r < 0.70) return 'regen_pod';
+    if (r < 0.82) return 'frag_grenade';
+    if (r < 0.92) return 'flashbang';
     return 'mana_elixir';
   }
-  const jugCut = tier === 3 ? 0.64 : tier === 2 ? 0.60 : 0.56;
-  if (r < 0.26) return 'impulse_booster';
-  if (r < 0.44) return 'shield_cell';
+  const jugCut = tier === 3 ? 0.48 : tier === 2 ? 0.45 : 0.42;
+  if (r < 0.20) return 'impulse_booster';
+  if (r < 0.34) return 'shield_cell';
   if (r < jugCut) return 'shield_jug';
-  if (r < 0.80) return 'medkit';
+  if (r < 0.57) return 'shield_drop';
+  if (r < 0.69) return 'medkit';
+  if (r < 0.77) return 'regen_pod';
+  if (r < 0.85) return 'frag_grenade';
+  if (r < 0.91) return 'flashbang';
   return 'hardlight_cover';
 }
 
@@ -830,7 +904,8 @@ export function rollChestLoot(tier: ChestTier, modeId: GameModeId = 'battle_roya
     isForcedWeapon ? rollSniperSupportUtility(t, excludeShield) : rollSupportUtility(t, excludeShield);
 
   const drops: ChestDropRoll[] = [];
-  const itemCountFor = (id: UtilityItemId): number => (id === 'shield_cell' ? 2 : 1);
+  const itemCountFor = (id: UtilityItemId): number =>
+    id === 'shield_cell' || id === 'frag_grenade' || id === 'flashbang' ? 2 : 1;
 
   if (effectiveTier === 1) {
     // Tier 1: 1–2 items (1 item ~45%, 2 items ~55%), guaranteed >= 1 Weapon
@@ -866,7 +941,10 @@ export function rollChestLoot(tier: ChestTier, modeId: GameModeId = 'battle_roya
         const extraWeapon = pickWeapon(2, weaponId);
         drops.push({ kind: 'weapon', id: extraWeapon, rarity: rollChestRarity(2), count: 1 });
       } else {
-        const extraUtil = pickUtility(2, secondId === 'shield_cell' || secondId === 'shield_jug');
+        const extraUtil = pickUtility(
+          2,
+          secondId === 'shield_cell' || secondId === 'shield_jug' || secondId === 'shield_drop'
+        );
         drops.push({
           kind: 'item',
           id: extraUtil,
@@ -926,11 +1004,15 @@ export function rollRandomLoot(highTier = false, modeId: GameModeId = 'battle_ro
 
   const itemRoll = Math.random();
   let id: UtilityItemId = 'shield_cell';
-  if (itemRoll < 0.25) id = 'shield_cell';
-  else if (itemRoll < 0.40) id = 'shield_jug';
-  else if (itemRoll < 0.58) id = 'medkit';
-  else if (itemRoll < 0.75) id = 'mana_elixir';
-  else if (itemRoll < 0.89) id = 'hardlight_cover';
+  if (itemRoll < 0.20) id = 'shield_cell';
+  else if (itemRoll < 0.31) id = 'shield_jug';
+  else if (itemRoll < 0.39) id = 'shield_drop';
+  else if (itemRoll < 0.52) id = 'medkit';
+  else if (itemRoll < 0.60) id = 'regen_pod';
+  else if (itemRoll < 0.71) id = 'mana_elixir';
+  else if (itemRoll < 0.81) id = 'frag_grenade';
+  else if (itemRoll < 0.88) id = 'flashbang';
+  else if (itemRoll < 0.94) id = 'hardlight_cover';
   else id = 'impulse_booster';
   return { kind: 'item', id, rarity };
 }
