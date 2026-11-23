@@ -1208,11 +1208,11 @@ export class TacticalMinimap {
       ctx.restore();
     }
 
-    // 2. White Dashed Next Safe Zone Preview Ring
+    // 2. White Dashed Next Safe Zone Preview Ring + Moving Final Storm Direction Vector
+    const nextCX = proj.wx(state.nextStormCenterX);
+    const nextCY = proj.wz(state.nextStormCenterZ);
     const nextR = proj.wr(state.nextStormRadius);
     if (nextR > 0.5) {
-      const nextCX = proj.wx(state.nextStormCenterX);
-      const nextCY = proj.wz(state.nextStormCenterZ);
       ctx.save();
       ctx.beginPath();
       ctx.arc(nextCX, nextCY, nextR, 0, Math.PI * 2);
@@ -1221,6 +1221,118 @@ export class TacticalMinimap {
       ctx.setLineDash(detailed ? [8, 6] : [4, 3.5]);
       ctx.stroke();
       ctx.restore();
+    }
+
+    // 2b. Moving Final Storm Direction Arrow (dashed cyan/white vector from stormCenter -> nextStormCenter)
+    const stormCenterShiftM = Math.hypot(
+      state.nextStormCenterX - state.stormCenterX,
+      state.nextStormCenterZ - state.stormCenterZ
+    );
+    const showMovingArrow =
+      Boolean(state.stormMoving) || (state.stormRadius <= 36 && stormCenterShiftM > 12);
+    if (showMovingArrow) {
+      const vecDx = nextCX - stormCX;
+      const vecDy = nextCY - stormCY;
+      const vecLen = Math.hypot(vecDx, vecDy);
+      if (vecLen > 3) {
+        const angle = Math.atan2(vecDy, vecDx);
+        const headLen = detailed ? 11 : 6.2;
+        const headHalfW = detailed ? 5.5 : 3.2;
+        const tipX = nextCX;
+        const tipY = nextCY;
+        const shaftEndX = tipX - Math.cos(angle) * (headLen * 0.72);
+        const shaftEndY = tipY - Math.sin(angle) * (headLen * 0.72);
+
+        ctx.save();
+        // Dark contrast under-stroke for crisp visibility over bright campus roofs
+        ctx.beginPath();
+        ctx.moveTo(stormCX, stormCY);
+        ctx.lineTo(shaftEndX, shaftEndY);
+        ctx.strokeStyle = 'rgba(15, 23, 42, 0.72)';
+        ctx.lineWidth = detailed ? 4.2 : 2.6;
+        ctx.setLineDash(detailed ? [8, 5] : [4, 3]);
+        ctx.stroke();
+
+        // Crisp dashed cyan/white direction vector
+        ctx.beginPath();
+        ctx.moveTo(stormCX, stormCY);
+        ctx.lineTo(shaftEndX, shaftEndY);
+        ctx.strokeStyle = '#67e8f9';
+        ctx.lineWidth = detailed ? 2.4 : 1.5;
+        ctx.shadowColor = 'rgba(34, 211, 238, 0.85)';
+        ctx.shadowBlur = detailed ? 7 : 4;
+        ctx.setLineDash(detailed ? [8, 5] : [4, 3]);
+        ctx.stroke();
+
+        // Solid crisp cyan/white arrowhead at nextStormCenter
+        ctx.setLineDash([]);
+        ctx.translate(tipX, tipY);
+        ctx.rotate(angle);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-headLen, -headHalfW);
+        ctx.lineTo(-headLen * 0.76, 0);
+        ctx.lineTo(-headLen, headHalfW);
+        ctx.closePath();
+        ctx.fillStyle = '#e0f2fe';
+        ctx.fill();
+        ctx.strokeStyle = '#0891b2';
+        ctx.lineWidth = detailed ? 1.5 : 0.9;
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // 2c. Flying Google GBus Dashed Flight Path (drawn under tactical icons & bus icon)
+    if (state.gbus?.active) {
+      const gx0 = proj.wx(state.gbus.startX);
+      const gy0 = proj.wz(state.gbus.startZ);
+      const gx1 = proj.wx(state.gbus.endX);
+      const gy1 = proj.wz(state.gbus.endZ);
+      const pathDx = gx1 - gx0;
+      const pathDy = gy1 - gy0;
+      const pathLen = Math.hypot(pathDx, pathDy);
+
+      if (pathLen > 2) {
+        const pathAngle = Math.atan2(pathDy, pathDx);
+        ctx.save();
+        // Subtle dark contrast backing
+        ctx.beginPath();
+        ctx.moveTo(gx0, gy0);
+        ctx.lineTo(gx1, gy1);
+        ctx.strokeStyle = 'rgba(15, 23, 42, 0.55)';
+        ctx.lineWidth = detailed ? 4.4 : 2.8;
+        ctx.setLineDash([7, 5]);
+        ctx.stroke();
+
+        // Bright white dashed flight path with Google Blue (#4285F4) glow
+        ctx.beginPath();
+        ctx.moveTo(gx0, gy0);
+        ctx.lineTo(gx1, gy1);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = detailed ? 2.4 : 1.6;
+        ctx.shadowColor = '#4285F4';
+        ctx.shadowBlur = detailed ? 10 : 6;
+        ctx.setLineDash([7, 5]);
+        ctx.stroke();
+
+        // Clean directional chevron arrowhead at exit end
+        ctx.setLineDash([]);
+        const chevLen = detailed ? 12 : 7;
+        const chevW = detailed ? 7 : 4.2;
+        ctx.translate(gx1, gy1);
+        ctx.rotate(pathAngle);
+        ctx.beginPath();
+        ctx.moveTo(-chevLen, -chevW);
+        ctx.lineTo(0, 0);
+        ctx.lineTo(-chevLen, chevW);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = detailed ? 2.6 : 1.7;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+        ctx.restore();
+      }
     }
 
     // 3. Unopened Loot Chests (Tier 1 Amber / Tier 2 Blue / Tier 3 Purple+Gold)
@@ -1737,6 +1849,79 @@ export class TacticalMinimap {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(youLabel, pillX + pw * 0.5, pillY + ph * 0.5 + 0.5);
+      ctx.restore();
+    }
+
+    // 7. Live Winged Google GBus Vector Icon (drawn on top so it's unmistakable on both maps)
+    if (state.gbus?.active) {
+      const bx = proj.wx(state.gbus.x);
+      const by = proj.wz(state.gbus.z);
+      const s = detailed ? 1.85 : 1.1;
+
+      ctx.save();
+      ctx.translate(bx, by);
+      // Matches Three.js yaw convention: yaw=0 faces North (-Y on canvas), +yaw rotates CCW
+      ctx.rotate(-state.gbus.yaw);
+
+      ctx.shadowColor = 'rgba(66, 133, 244, 0.72)';
+      ctx.shadowBlur = detailed ? 10 : 5;
+
+      // Swept Google Blue wings (left & right)
+      ctx.beginPath();
+      ctx.moveTo(-2.5 * s, -2.0 * s);
+      ctx.lineTo(-10.8 * s, 2.2 * s);
+      ctx.lineTo(-9.6 * s, 4.4 * s);
+      ctx.lineTo(-2.5 * s, 2.4 * s);
+      ctx.closePath();
+      ctx.moveTo(2.5 * s, -2.0 * s);
+      ctx.lineTo(10.8 * s, 2.2 * s);
+      ctx.lineTo(9.6 * s, 4.4 * s);
+      ctx.lineTo(2.5 * s, 2.4 * s);
+      ctx.closePath();
+      ctx.fillStyle = '#4285F4';
+      ctx.fill();
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = detailed ? 1.5 : 1.05;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+
+      // Tail stabilizer fins
+      ctx.beginPath();
+      ctx.moveTo(-2.0 * s, 5.2 * s);
+      ctx.lineTo(-5.2 * s, 7.6 * s);
+      ctx.lineTo(-4.4 * s, 8.6 * s);
+      ctx.lineTo(-1.8 * s, 7.3 * s);
+      ctx.closePath();
+      ctx.moveTo(2.0 * s, 5.2 * s);
+      ctx.lineTo(5.2 * s, 7.6 * s);
+      ctx.lineTo(4.4 * s, 8.6 * s);
+      ctx.lineTo(1.8 * s, 7.3 * s);
+      ctx.closePath();
+      ctx.fillStyle = '#34A853';
+      ctx.fill();
+      ctx.stroke();
+
+      // Crisp white rounded GBus fuselage
+      ctx.shadowBlur = 0;
+      const fw = 5.4 * s;
+      const fh = 15.2 * s;
+      drawRoundedRectPath(ctx, -fw * 0.5, -fh * 0.5, fw, fh, 2.2 * s);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = detailed ? 1.6 : 1.1;
+      ctx.stroke();
+
+      // Tinted front windshield & subtle Google accent stripe
+      ctx.fillStyle = '#1e3a8a';
+      drawRoundedRectPath(ctx, -fw * 0.36, -fh * 0.43, fw * 0.72, 2.5 * s, 0.9 * s);
+      ctx.fill();
+
+      ctx.fillStyle = '#FBBC04';
+      ctx.fillRect(-fw * 0.24, -fh * 0.14, fw * 0.48, 1.4 * s);
+      ctx.fillStyle = '#EA4335';
+      ctx.fillRect(-fw * 0.24, fh * 0.06, fw * 0.48, 1.4 * s);
+
       ctx.restore();
     }
   }

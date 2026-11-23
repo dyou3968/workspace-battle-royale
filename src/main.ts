@@ -255,6 +255,9 @@ const hudElims = document.getElementById('hud-elims')!;
 const hudHeadshots = document.getElementById('hud-headshots')!;
 const hudBotTier = document.getElementById('hud-bot-tier')!;
 const skydropPrompt = document.getElementById('skydrop-prompt')!;
+const skydropBadge = document.getElementById('skydrop-badge')!;
+const skydropBusText = document.getElementById('skydrop-bus-text')!;
+const skydropAltWrap = document.getElementById('skydrop-alt-wrap')!;
 const skydropAlt = document.getElementById('skydrop-alt')!;
 const skydropBar = document.getElementById('skydrop-bar')!;
 const bannerToast = document.getElementById('banner-toast')!;
@@ -1800,8 +1803,9 @@ function renderHud(state: HudSnapshot): void {
   setTextCached(zoneNameEl, upperZone);
 
   if (!mode.stormEnabled) {
-    stormPill.classList.remove('in-storm');
+    stormPill.classList.remove('in-storm', 'is-moving');
     stormPill.classList.add('no-storm');
+    stormPhaseBadge.classList.remove('is-moving');
     setTextCached(stormPhaseBadge, 'SAFE');
     setTextCached(stormStatus, 'FREE ROAM · NO STORM');
     if (isFullMapOpen) {
@@ -1811,12 +1815,18 @@ function renderHud(state: HudSnapshot): void {
     }
   } else {
     stormPill.classList.remove('no-storm');
-    setTextCached(stormPhaseBadge, `P${state.stormPhase}`);
+    const isMoving = Boolean(state.stormIsMoving);
+    const phaseTag = isMoving ? `M${state.stormPhase}` : `P${state.stormPhase}`;
+    stormPhaseBadge.classList.toggle('is-moving', isMoving);
+    stormPill.classList.toggle('is-moving', isMoving);
+    setTextCached(stormPhaseBadge, phaseTag);
     const timerStr = `${Math.max(0, Math.ceil(state.stormTimer))}s`;
     const cleanStormLabel = state.stormStateLabel.replace(/^Phase\s+\d+\s+/i, '');
     const stormAction =
       cleanStormLabel.toLowerCase() === 'wait'
-        ? `Shrinking in ${timerStr}`
+        ? isMoving
+          ? `Moving in ${timerStr}`
+          : `Shrinking in ${timerStr}`
         : `${cleanStormLabel} · ${timerStr}`;
     setTextCached(
       stormStatus,
@@ -1827,14 +1837,29 @@ function renderHud(state: HudSnapshot): void {
     if (isFullMapOpen) {
       setTextCached(fullmapZoneEl, state.zoneName);
       fullmapStormEl.classList.remove('no-storm');
-      setTextCached(fullmapStormEl, `P${state.stormPhase} · ${stormAction}`);
+      setTextCached(fullmapStormEl, `${isMoving ? `${phaseTag} MOVING` : phaseTag} · ${stormAction}`);
     }
   }
 
-  // Sky-Drop Glider HUD Prompt
-  const isSkyDrop = state.status.skyDropping || state.matchPhase === 'skydrop';
+  // GBus Drop / Sky-Drop Glider HUD Prompt
+  const inBus = Boolean(state.status.inBus);
+  const isSkyDrop = inBus || state.status.skyDropping || state.matchPhase === 'skydrop';
   skydropPrompt.classList.toggle('hidden', !isSkyDrop);
-  if (isSkyDrop) {
+  skydropPrompt.classList.toggle('is-bus', inBus);
+  if (inBus) {
+    setTextCached(skydropBadge, 'GBUS DROP');
+    skydropBusText.classList.remove('hidden');
+    skydropAltWrap.classList.add('hidden');
+    setTextCached(
+      skydropBusText,
+      state.status.canDropFromBus ? 'PRESS SPACE TO JUMP' : 'APPROACHING CAMPUS'
+    );
+    const busPct = Math.max(0, Math.min(100, (state.status.busProgress ?? 0) * 100));
+    setWidthCached(skydropBar, `${busPct.toFixed(1)}%`);
+  } else if (isSkyDrop) {
+    setTextCached(skydropBadge, 'SKY DROP');
+    skydropBusText.classList.add('hidden');
+    skydropAltWrap.classList.remove('hidden');
     const alt = Math.max(0, Math.round(state.status.altitude));
     setTextCached(skydropAlt, `${alt}m`);
     const altPct = Math.max(0, Math.min(100, (state.status.altitude / GAME_CONSTANTS.SKY_DROP_ALTITUDE) * 100));
@@ -2860,7 +2885,7 @@ const preloadPromise: Promise<void> = engine
     assetPreloadBar.classList.add('ready');
     preloadPct.textContent = '100%';
     preloadFill.style.width = '100%';
-    const totalCount = lastPreloadTotal || 52;
+    const totalCount = lastPreloadTotal || 53;
     preloadLabel.textContent = `All ${totalCount} 3D Mountain View campus assets loaded`;
     assetStatusChip.classList.add('ready');
     assetChipText.textContent = `Ready · ${totalCount} assets`;

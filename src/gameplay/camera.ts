@@ -20,6 +20,7 @@ export interface CameraUpdateInput {
   isAds: boolean;
   sniperScope: boolean;
   skyDropping: boolean;
+  inBus?: boolean;
   dead: boolean;
   raycastDist: CameraRaycastFn;
 }
@@ -112,6 +113,7 @@ export class ThirdPersonCamera {
       isAds,
       sniperScope,
       skyDropping,
+      inBus = false,
       dead,
       raycastDist,
     } = input;
@@ -148,7 +150,15 @@ export class ThirdPersonCamera {
     let targetRight = 0.72;
     let targetUp = crouching ? 0.2 : 0.24;
 
-    if (skyDropping) {
+    const isAerial = inBus || skyDropping;
+
+    if (inBus) {
+      // Scenic panoramic aerial camera orbiting cleanly around the winged Google GBus
+      targetFov = 74;
+      targetBack = 16.5;
+      targetRight = 0.0;
+      targetUp = 3.2;
+    } else if (skyDropping) {
       targetFov = sprinting ? 84 : 76;
       targetBack = sprinting ? 5.6 : 6.4;
       targetRight = 0.0;
@@ -183,8 +193,9 @@ export class ThirdPersonCamera {
       targetUp = 0.26;
     }
 
-    const targetEye =
-      ridingGBike && !skyDropping
+    const targetEye = inBus
+      ? 0.5
+      : ridingGBike && !isAerial
         ? 1.48
         : sliding && !isAds && !sniperScope
           ? GAME_CONSTANTS.EYE_HEIGHT_SLIDING
@@ -203,9 +214,9 @@ export class ThirdPersonCamera {
 
     const safeBikeLean = Number.isFinite(gbikeLean) ? gbikeLean : 0;
     let targetRoll = 0;
-    if (ridingGBike && !skyDropping) {
+    if (ridingGBike && !isAerial) {
       targetRoll = Math.max(-0.055, Math.min(0.055, safeBikeLean * 0.24));
-    } else if (sliding && !isAds && !sniperScope && !skyDropping) {
+    } else if (sliding && !isAds && !sniperScope && !isAerial) {
       targetRoll = -0.026;
     }
     this.currentRoll += (targetRoll - this.currentRoll) * Math.min(1, dt * 11);
@@ -235,7 +246,7 @@ export class ThirdPersonCamera {
     // 1. Check horizontal shoulder clearance so standing beside an interior office wall
     //    or doorway jamb smoothly tucks the right-shoulder offset instead of clipping/snapping
     let targetShoulderScale = 1.0;
-    if (!skyDropping && Math.abs(this.currentRightOffset) > 0.05) {
+    if (!isAerial && Math.abs(this.currentRightOffset) > 0.05) {
       const shLen = Math.hypot(this.currentRightOffset, this.currentUpOffset);
       this.probeDir
         .copy(this.right)
@@ -262,7 +273,7 @@ export class ThirdPersonCamera {
 
     // 3. Indoor ceiling clearance probe (smoothly glides beneath Y=5.75m office ceilings
     //    instead of snapping the camera inward when looking downward or jumping indoors)
-    if (!skyDropping && this.desiredPos.y > this.pivot.y + 0.15) {
+    if (!isAerial && this.desiredPos.y > this.pivot.y + 0.15) {
       const maxCeilProbe = Math.min(5.6, (this.desiredPos.y - this.pivot.y) + 0.55);
       const ceilHit = raycastDist(this.pivot, this.up, maxCeilProbe);
       if (ceilHit < maxCeilProbe) {
@@ -282,7 +293,7 @@ export class ThirdPersonCamera {
 
       // Subtle lateral & vertical clearance whiskers when grounded indoors to catch thin
       // interior wall edges, doorway frames, and ceiling lips before the near plane clips
-      if (!skyDropping && maxArmDist > 0.65) {
+      if (!isAerial && maxArmDist > 0.65) {
         const whiskerSpan = 0.14;
         const probes: [number, number][] = [
           [whiskerSpan, 0],

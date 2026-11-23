@@ -53,6 +53,7 @@ import { assignBotTiers, getBotProfile } from '../data/botProfiles';
 import {
   alignWeaponTwoHanded,
   AssetManager,
+  GoogleGBusVisual,
   HeroInstance,
   LootChestVisual,
   LootDropVisual,
@@ -98,6 +99,7 @@ import {
   FLAG_CHANNELING,
   FLAG_CROUCHING,
   FLAG_GROUNDED,
+  FLAG_IN_BUS,
   FLAG_RELOADING,
   FLAG_REWINDING,
   FLAG_SKYDROPPING,
@@ -209,6 +211,8 @@ interface Combatant {
   pitch: number;
 
   alive: boolean;
+  inBus: boolean;
+  busDropProgress: number;
   skyDropping: boolean;
   grounded: boolean;
   crouching: boolean;
@@ -522,6 +526,24 @@ const QUALITY_PRESETS: Record<QualityPreset, QualityConfig> = {
   },
 };
 
+interface GoogleGBusState {
+  active: boolean;
+  visual: GoogleGBusVisual;
+  startX: number;
+  startZ: number;
+  endX: number;
+  endZ: number;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  elapsed: number;
+  duration: number;
+  progress: number;
+  hornPlayed: boolean;
+  trailTimer: number;
+}
+
 export class WorkspaceRoyaleEngine {
   public readonly assetManager: AssetManager;
 
@@ -564,6 +586,7 @@ export class WorkspaceRoyaleEngine {
   private pendingBeams: PendingSlidesBeam[] = [];
   private supplyDrops: SupplyDropEntity[] = [];
   private worldGBikes: WorldGBike[] = [];
+  private gbus: GoogleGBusState | null = null;
   private soundEvents: SoundEventRecord[] = [];
   private supplyDropsSpawned = 0;
   private worldVisualTime = 0;
@@ -1211,7 +1234,9 @@ export class WorkspaceRoyaleEngine {
     this.spawnInitialCampusChests(this.mpRng);
     this.spawnInitialCampusGBikes();
 
-    const dropRing = this.world.gliderDropPoints;
+    // Deterministic edge-to-edge Flying Google GBus route shared identically across all MP peers
+    const gbus = this.spawnGBus(this.mpRng);
+
     const selfSpec = payload.combatants.find((s) => s.id === selfId) ?? null;
     this.mpTeamId = this.mpFormat === 'teams' ? (selfSpec?.teamId ?? null) : null;
 
@@ -1220,16 +1245,6 @@ export class WorkspaceRoyaleEngine {
 
     for (let i = 0; i < payload.combatants.length; i++) {
       const spec = payload.combatants[i];
-      const dp =
-        dropRing.length > 0
-          ? dropRing[((spec.dropIndex % dropRing.length) + dropRing.length) % dropRing.length]
-          : {
-              x: Math.cos((i / Math.max(1, payload.combatants.length)) * Math.PI * 2) * 255,
-              y: GAME_CONSTANTS.SKY_DROP_ALTITUDE,
-              z: Math.sin((i / Math.max(1, payload.combatants.length)) * Math.PI * 2) * 158,
-              heading: 0,
-            };
-
       const isSelf = spec.id === selfId;
       const isRemoteHuman = spec.isHuman && !isSelf;
       const teamId: TeamId | null = this.mpFormat === 'teams' ? spec.teamId : null;
@@ -1238,6 +1253,7 @@ export class WorkspaceRoyaleEngine {
         !spec.isHuman && this.isMpHost
           ? new BotBrain(getBotProfile(botTier ?? 'tactical'), this.world.landmarks)
           : undefined;
+      const busDropProgress = !spec.isHuman ? 0.1 + this.mpRng() * 0.76 : 0.94;
 
       const combatant = this.spawnCombatant({
         id: spec.id,
@@ -1250,10 +1266,12 @@ export class WorkspaceRoyaleEngine {
         brain,
         botIndex: !spec.isHuman ? botIndex++ : undefined,
         totalBots,
-        x: dp.x,
-        y: dp.y,
-        z: dp.z,
-        yaw: dp.heading,
+        x: gbus.startX,
+        y: gbus.y - 1.2,
+        z: gbus.startZ,
+        yaw: gbus.yaw,
+        inBus: true,
+        busDropProgress,
       });
 
       if (isSelf) {
@@ -1279,19 +1297,19 @@ export class WorkspaceRoyaleEngine {
     if (this.player) {
       this.camController.reset(this.player.pos, this.player.yaw);
     }
-    this.audio.setGliderWind(true, false);
+    this.audio.setGliderWind(false, false);
     this.requestPointerLock();
 
     if (this.mpFormat === 'teams' && this.mpTeamId) {
       const tLabel = TEAM_CONFIG[this.mpTeamId].label.toUpperCase();
       this.callbacks.onAnnouncement(
-        `TEAM ${tLabel} — DROP IN!`,
-        `Room ${this.mpRoomCode} · Coordinate with your squad & outlast rival teams`
+        `TEAM ${tLabel} — GOOGLE GBUS DEPARTING`,
+        `Room ${this.mpRoomCode} · Press SPACE to jump & survey the campus`
       );
     } else {
       this.callbacks.onAnnouncement(
-        'DROP INTO GOOGLEPLEX',
-        `Private Room ${this.mpRoomCode} · ${payload.combatants.length} Combatants`
+        'GOOGLE GBUS DEPARTING',
+        `Private Room ${this.mpRoomCode} · ${payload.combatants.length} Combatants · Press SPACE to Jump`
       );
     }
     this.emitHudSnapshot();
@@ -1364,30 +1382,27 @@ export class WorkspaceRoyaleEngine {
     // Spawn all 18 rideable Google GBikes across campus corrals & iconic hubs
     this.spawnInitialCampusGBikes();
 
-    // Shuffle the 20 perimeter glider drop points (altitude = 135m)
-    const dropRing = [...this.world.gliderDropPoints];
-    for (let i = dropRing.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [dropRing[i], dropRing[j]] = [dropRing[j], dropRing[i]];
-    }
+    // Launch the winged Flying Google GBus on a fresh edge-to-edge flight path across the Googleplex
+    const gbus = this.spawnGBus(Math.random);
 
-    // Spawn local player at drop point 0
-    const playerDrop = dropRing[0] ?? { x: -220, y: GAME_CONSTANTS.SKY_DROP_ALTITUDE, z: 120, heading: -0.7 };
+    // Spawn local player aboard the GBus
     const heroDef = HERO_MAP[heroId];
     this.player = this.spawnCombatant({
       id: 'player',
       name: heroDef.personaName,
       isPlayer: true,
       heroId,
-      x: playerDrop.x,
-      y: playerDrop.y,
-      z: playerDrop.z,
-      yaw: playerDrop.heading,
+      x: gbus.startX,
+      y: gbus.y - 1.2,
+      z: gbus.startZ,
+      yaw: gbus.yaw,
+      inBus: true,
+      busDropProgress: GAME_CONSTANTS.GBUS_AUTO_EJECT_PROGRESS,
     });
 
-    // Spawn mode-configured AI Workspace Bots with assigned multi-tier intelligence profiles
+    // Spawn mode-configured AI Workspace Bots aboard the GBus with staggered drop timing
     const desiredBots = Math.max(0, mode.totalCombatants - 1);
-    const botCount = dropRing.length > 0 ? Math.min(desiredBots, Math.max(0, dropRing.length - 1)) : desiredBots;
+    const botCount = desiredBots;
     const botTiers = assignBotTiers(effectiveDiff, botCount);
     const nameCounters: Record<ProductHeroId, number> = {
       gmail: 0,
@@ -1403,12 +1418,6 @@ export class WorkspaceRoyaleEngine {
       const names = BOT_CALLSIGNS[bHeroId];
       const nIdx = nameCounters[bHeroId]++;
       const botName = names[nIdx % names.length] + (nIdx >= names.length ? ` ${nIdx + 1}` : '');
-      const dp = dropRing[(i + 1) % dropRing.length] ?? {
-        x: Math.cos((i / Math.max(1, botCount)) * Math.PI * 2) * 255,
-        y: GAME_CONSTANTS.SKY_DROP_ALTITUDE,
-        z: Math.sin((i / Math.max(1, botCount)) * Math.PI * 2) * 158,
-        heading: 0,
-      };
       const tier = botTiers[i];
       const profile = getBotProfile(tier);
       this.spawnCombatant({
@@ -1420,36 +1429,38 @@ export class WorkspaceRoyaleEngine {
         brain: new BotBrain(profile, this.world.landmarks),
         botIndex: i,
         totalBots: botCount,
-        x: dp.x,
-        y: dp.y,
-        z: dp.z,
-        yaw: dp.heading,
+        x: gbus.startX,
+        y: gbus.y - 1.2,
+        z: gbus.startZ,
+        yaw: gbus.yaw,
+        inBus: true,
+        busDropProgress: 0.1 + Math.random() * 0.76,
       });
     }
 
     this.camController.reset(this.player.pos, this.player.yaw);
-    this.audio.setGliderWind(true, false);
+    this.audio.setGliderWind(false, false);
     this.requestPointerLock();
 
     if (mode.id === 'blitz') {
       this.callbacks.onAnnouncement(
-        'BLITZ ROYALE',
-        '1.8× Faster Storm · Upgraded Tier 2–3 Chests · +65% Mana Regen'
+        'BLITZ ROYALE — GBUS DEPARTING',
+        'Press SPACE to Jump · 1.8× Faster Storm · Tier 2–3 Chests'
       );
     } else if (mode.id === 'sniper_showdown') {
       this.callbacks.onAnnouncement(
-        'SNIPER SHOWDOWN',
-        'Longbow .308 Exclusive · Claim Rooftops · 2.0× Headshot Crits'
+        'SNIPER SHOWDOWN — GBUS DEPARTING',
+        'Press SPACE to Jump · Longbow .308 Exclusive · Claim Rooftops'
       );
     } else if (mode.id === 'campus_practice') {
       this.callbacks.onAnnouncement(
-        'CAMPUS FREE ROAM',
-        'No Storm · 6 Intern Sparring Bots · Full Mana · Explore the 3× Googleplex'
+        'CAMPUS FREE ROAM — GBUS TOUR',
+        'Press SPACE to Jump · No Storm · Explore the 3× Googleplex'
       );
     } else {
       this.callbacks.onAnnouncement(
-        'DROP INTO GOOGLEPLEX',
-        'WASD Steer · SHIFT Dive · Land & Open Chests [E] for Gear'
+        'GOOGLE GBUS DEPARTING',
+        'Press SPACE to Jump · [M] Tactical Map · Land & Open Chests [E]'
       );
     }
     this.emitHudSnapshot();
@@ -1470,20 +1481,24 @@ export class WorkspaceRoyaleEngine {
     y: number;
     z: number;
     yaw: number;
+    inBus?: boolean;
+    busDropProgress?: number;
   }): Combatant {
     const mode = GAME_MODES[this.activeGameMode] ?? GAME_MODES.battle_royale;
+    const inBus = Boolean(opts.inBus);
     const hero = this.assetManager.instantiateHero(opts.heroId, {
       includeOverhead: !opts.isPlayer,
     });
     hero.root.position.set(opts.x, opts.y, opts.z);
     hero.root.rotation.y = opts.yaw;
+    hero.root.visible = !inBus;
     hero.crossFade('Glide', 0.05);
     this.scene.add(hero.root);
 
     const gliderMesh = this.assetManager.instantiateProp('glider');
     gliderMesh.position.set(0, 0, 0);
     hero.gliderMount.add(gliderMesh);
-    gliderMesh.visible = true;
+    gliderMesh.visible = !inBus;
 
     const slots = createStarterLoadout();
     const startMana = Math.min(GAME_CONSTANTS.MAX_MANA, mode.startMana);
@@ -1506,8 +1521,10 @@ export class WorkspaceRoyaleEngine {
       pos: new THREE.Vector3(opts.x, opts.y, opts.z),
       vel: new THREE.Vector3(0, -8, 0),
       yaw: opts.yaw,
-      pitch: opts.isPlayer ? -0.35 : 0,
+      pitch: opts.isPlayer ? -0.42 : 0,
       alive: true,
+      inBus,
+      busDropProgress: opts.busDropProgress ?? 0.5,
       skyDropping: true,
       grounded: false,
       crouching: false,
@@ -1671,6 +1688,11 @@ export class WorkspaceRoyaleEngine {
       this.scene.remove(bike.visual.root);
     }
     this.worldGBikes.length = 0;
+
+    if (this.gbus) {
+      this.scene.remove(this.gbus.visual.root);
+      this.gbus = null;
+    }
 
     this.soundEvents.length = 0;
     this.pendingBeams.length = 0;
@@ -2041,6 +2063,7 @@ export class WorkspaceRoyaleEngine {
     this.matchElapsed += dt;
     this.unarmedHintCooldown = Math.max(0, this.unarmedHintCooldown - dt);
     this.updateSoundEvents(dt);
+    this.updateGBus(dt);
     this.updateStorm(dt);
     this.updateSupplyDrops(dt);
     this.updateActiveZones(dt);
@@ -2089,7 +2112,178 @@ export class WorkspaceRoyaleEngine {
   }
 
   // =========================================================================
-  // 5-PHASE STORM & MID-MATCH SUPPLY DROPS
+  // FLYING GOOGLE GBUS WITH WINGS (DROP-IN BATTLE BUS)
+  // =========================================================================
+
+  private spawnGBus(rngFn: () => number): GoogleGBusState {
+    if (this.gbus) {
+      this.scene.remove(this.gbus.visual.root);
+      this.gbus = null;
+    }
+
+    const theta = rngFn() * Math.PI * 2;
+    const rx = 335;
+    const rz = 225;
+    const perpOffset = (rngFn() - 0.5) * 110; // ±55m off-center variety across Googleplex landmarks
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+    const perpX = -sinT * perpOffset;
+    const perpZ = cosT * perpOffset;
+
+    const startX = cosT * rx + perpX;
+    const startZ = sinT * rz + perpZ;
+    const endX = -cosT * rx + perpX;
+    const endZ = -sinT * rz + perpZ;
+    const y = GAME_CONSTANTS.GBUS_ALTITUDE;
+    // Nose is at -Z in local GLB space -> forward vector is (-sin(yaw), 0, -cos(yaw))
+    const yaw = Math.atan2(-(endX - startX), -(endZ - startZ));
+
+    const visual = this.assetManager.instantiateGoogleGBus();
+    visual.root.position.set(startX, y, startZ);
+    visual.root.rotation.order = 'YXZ';
+    visual.root.rotation.set(0, yaw, 0);
+    this.scene.add(visual.root);
+
+    this.gbus = {
+      active: true,
+      visual,
+      startX,
+      startZ,
+      endX,
+      endZ,
+      x: startX,
+      y,
+      z: startZ,
+      yaw,
+      elapsed: 0,
+      duration: GAME_CONSTANTS.GBUS_FLIGHT_DURATION,
+      progress: 0,
+      hornPlayed: false,
+      trailTimer: 0.04,
+    };
+
+    return this.gbus;
+  }
+
+  private updateGBus(dt: number): void {
+    const gbus = this.gbus;
+    if (!gbus || !gbus.active) return;
+
+    gbus.elapsed += dt;
+    gbus.progress = gbus.elapsed / Math.max(1, gbus.duration);
+
+    gbus.x = gbus.startX + (gbus.endX - gbus.startX) * gbus.progress;
+    gbus.z = gbus.startZ + (gbus.endZ - gbus.startZ) * gbus.progress;
+    gbus.y = GAME_CONSTANTS.GBUS_ALTITUDE + Math.sin(gbus.elapsed * 2.2) * 0.45;
+    const roll = Math.sin(gbus.elapsed * 1.1) * 0.03;
+
+    gbus.visual.root.position.set(gbus.x, gbus.y, gbus.z);
+    gbus.visual.root.rotation.order = 'YXZ';
+    gbus.visual.root.rotation.set(0, gbus.yaw, roll);
+
+    if (gbus.visual.rotorL) {
+      gbus.visual.rotorL.rotation.z += dt * 26;
+    }
+    if (gbus.visual.rotorR) {
+      gbus.visual.rotorR.rotation.z -= dt * 26;
+    }
+
+    // Dual jet thruster contrails every 0.06s
+    gbus.trailTimer -= dt;
+    if (gbus.trailTimer <= 0) {
+      gbus.trailTimer = 0.06;
+      gbus.visual.root.updateMatrixWorld(true);
+      if (gbus.visual.thrusterL) {
+        gbus.visual.thrusterL.getWorldPosition(this.tmpVecA);
+        this.vfx.spawnGliderTrail(this.tmpVecA);
+      }
+      if (gbus.visual.thrusterR) {
+        gbus.visual.thrusterR.getWorldPosition(this.tmpVecB);
+        this.vfx.spawnGliderTrail(this.tmpVecB);
+      }
+    }
+
+    // Iconic Google GBus departure horn once campus drop zone unlocks
+    if (!gbus.hornPlayed && gbus.progress >= 0.05) {
+      gbus.hornPlayed = true;
+      this.audio.playGBusHorn();
+    }
+
+    // Keep passengers synchronized inside the GBus & trigger staggered bot drops + player auto-eject
+    for (const c of this.combatants) {
+      if (!c.alive || !c.inBus) continue;
+      c.pos.set(gbus.x, gbus.y - 1.2, gbus.z);
+      c.hero.root.visible = false;
+      c.gliderMesh.visible = false;
+
+      if (c.isPlayer) {
+        if (gbus.progress >= GAME_CONSTANTS.GBUS_AUTO_EJECT_PROGRESS) {
+          this.ejectFromGBus(c);
+        }
+      } else if (!c.isRemoteHuman && (!this.mpActive || this.isMpHost)) {
+        if (gbus.progress >= c.busDropProgress) {
+          this.ejectFromGBus(c);
+        }
+      }
+    }
+
+    // Despawn GBus cleanly once it clears the far perimeter (0 extra draw calls during ground combat!)
+    if (gbus.progress >= 1.18) {
+      for (const c of this.combatants) {
+        if (c.alive && c.inBus && (c.isPlayer || (!c.isRemoteHuman && (!this.mpActive || this.isMpHost)))) {
+          this.ejectFromGBus(c);
+        }
+      }
+      gbus.active = false;
+      this.scene.remove(gbus.visual.root);
+    }
+  }
+
+  private ejectFromGBus(c: Combatant): void {
+    if (!c.inBus) return;
+    c.inBus = false;
+    c.skyDropping = true;
+    c.hero.root.visible = true;
+    c.gliderMesh.visible = true;
+
+    const gbus = this.gbus;
+    const baseX = gbus ? gbus.x : c.pos.x;
+    const baseY = (gbus ? gbus.y : c.pos.y) - 2.6;
+    const baseZ = gbus ? gbus.z : c.pos.z;
+
+    let spawnX = baseX;
+    let spawnZ = baseZ;
+    if (!c.isPlayer) {
+      const spreadAng = Math.random() * Math.PI * 2;
+      const spreadDist = 1.6 + Math.random() * 2.8;
+      spawnX += Math.cos(spreadAng) * spreadDist;
+      spawnZ += Math.sin(spreadAng) * spreadDist;
+      // Steer bots toward campus interior on drop
+      const toCenterYaw = Math.atan2(spawnX, spawnZ);
+      c.yaw = toCenterYaw + (Math.random() - 0.5) * 1.1;
+    }
+
+    spawnX = THREE.MathUtils.clamp(spawnX, GAME_CONSTANTS.ARENA_MIN_X + 6, GAME_CONSTANTS.ARENA_MAX_X - 6);
+    spawnZ = THREE.MathUtils.clamp(spawnZ, GAME_CONSTANTS.ARENA_MIN_Z + 6, GAME_CONSTANTS.ARENA_MAX_Z - 6);
+
+    c.pos.set(spawnX, baseY, spawnZ);
+    const launchSpeed = c.isPlayer ? 20 : 22;
+    c.vel.set(-Math.sin(c.yaw) * launchSpeed, -10.5, -Math.cos(c.yaw) * launchSpeed);
+
+    c.hero.root.position.copy(c.pos);
+    c.hero.root.rotation.order = 'YXZ';
+    c.hero.root.rotation.set(0, c.yaw, 0);
+    c.hero.crossFade('Glide', 0.05);
+
+    if (c.isPlayer) {
+      this.audio.playGBusJump();
+      this.audio.setGliderWind(true, false);
+      this.emitHudSnapshot();
+    }
+  }
+
+  // =========================================================================
+  // 8-PHASE STORM (PHASES 6–8 MOVING FINAL CIRCLES) & MID-MATCH SUPPLY DROPS
   // =========================================================================
 
   private updateStorm(dt: number): void {
@@ -2138,10 +2332,17 @@ export class WorkspaceRoyaleEngine {
         this.stormStartCenterX = this.stormCenterX;
         this.stormStartCenterZ = this.stormCenterZ;
         this.stormStartRadius = this.stormRadius;
-        this.callbacks.onAnnouncement(
-          `STORM PHASE ${phaseDef.phase} CLOSING`,
-          `Safe zone shrinking (${phaseDef.dps} HP/s outside)`
-        );
+        if (phaseDef.isMoving) {
+          this.callbacks.onAnnouncement(
+            `MOVING ZONE ${phaseDef.phase}`,
+            `Safe zone shifting across campus (${phaseDef.dps} HP/s outside)`
+          );
+        } else {
+          this.callbacks.onAnnouncement(
+            `STORM PHASE ${phaseDef.phase} CLOSING`,
+            `Safe zone shrinking (${phaseDef.dps} HP/s outside)`
+          );
+        }
       }
     } else {
       const progress = 1 - Math.max(0, this.stormPhaseTimer) / scaledShrinkDuration;
@@ -2160,22 +2361,67 @@ export class WorkspaceRoyaleEngine {
           this.stormMode = 'wait';
           this.stormPhaseTimer = nextDef.waitDuration * mode.stormPaceMult;
 
-          // Drift next safe zone subtly within current circle (deterministic in MP via mpRng)
           const rngFn = this.mpActive && this.mpRng ? this.mpRng : Math.random;
-          const maxShift = Math.max(0, this.stormRadius - nextDef.targetRadius) * 0.45;
-          const ang = rngFn() * Math.PI * 2;
-          const shift = rngFn() * maxShift;
-          this.nextStormCenterX = THREE.MathUtils.clamp(
-            this.stormCenterX + Math.cos(ang) * shift,
-            GAME_CONSTANTS.ARENA_MIN_X + 24,
-            GAME_CONSTANTS.ARENA_MAX_X - 24
-          );
-          this.nextStormCenterZ = THREE.MathUtils.clamp(
-            this.stormCenterZ + Math.sin(ang) * shift,
-            GAME_CONSTANTS.ARENA_MIN_Z + 24,
-            GAME_CONSTANTS.ARENA_MAX_Z - 24
-          );
-          this.nextStormRadius = nextDef.targetRadius;
+          if (nextDef.isMoving) {
+            // Moving Final Circle (Phases 6, 7, 8): shift target center outside current circle across playable campus
+            const minShift = nextDef.moveShiftMin ?? 48;
+            const maxShift = nextDef.moveShiftMax ?? 78;
+            const shift = minShift + rngFn() * (maxShift - minShift);
+            const minX = GAME_CONSTANTS.ARENA_MIN_X + 36;
+            const maxX = GAME_CONSTANTS.ARENA_MAX_X - 36;
+            const minZ = GAME_CONSTANTS.ARENA_MIN_Z + 36;
+            const maxZ = GAME_CONSTANTS.ARENA_MAX_Z - 36;
+
+            let chosenX: number | null = null;
+            let chosenZ: number | null = null;
+            const baseAng = rngFn() * Math.PI * 2;
+            for (let attempt = 0; attempt < 6; attempt++) {
+              const ang = baseAng + (attempt * Math.PI * 2) / 6;
+              const candX = this.stormCenterX + Math.cos(ang) * shift;
+              const candZ = this.stormCenterZ + Math.sin(ang) * shift;
+              if (candX >= minX && candX <= maxX && candZ >= minZ && candZ <= maxZ) {
+                chosenX = candX;
+                chosenZ = candZ;
+                break;
+              }
+            }
+            if (chosenX === null || chosenZ === null) {
+              const towardCenterAng = Math.atan2(-this.stormCenterZ, -this.stormCenterX);
+              chosenX = THREE.MathUtils.clamp(
+                this.stormCenterX + Math.cos(towardCenterAng) * shift,
+                minX,
+                maxX
+              );
+              chosenZ = THREE.MathUtils.clamp(
+                this.stormCenterZ + Math.sin(towardCenterAng) * shift,
+                minZ,
+                maxZ
+              );
+            }
+            this.nextStormCenterX = chosenX;
+            this.nextStormCenterZ = chosenZ;
+            this.nextStormRadius = nextDef.targetRadius;
+            this.callbacks.onAnnouncement(
+              'MOVING FINAL CIRCLE',
+              `Moving Zone ${nextDef.phase} shifts in ${Math.ceil(this.stormPhaseTimer)}s (${nextDef.dps} HP/s)`
+            );
+          } else {
+            // Standard Phases 1–5: drift next safe zone subtly within current circle (deterministic in MP via mpRng)
+            const maxShift = Math.max(0, this.stormRadius - nextDef.targetRadius) * 0.45;
+            const ang = rngFn() * Math.PI * 2;
+            const shift = rngFn() * maxShift;
+            this.nextStormCenterX = THREE.MathUtils.clamp(
+              this.stormCenterX + Math.cos(ang) * shift,
+              GAME_CONSTANTS.ARENA_MIN_X + 24,
+              GAME_CONSTANTS.ARENA_MAX_X - 24
+            );
+            this.nextStormCenterZ = THREE.MathUtils.clamp(
+              this.stormCenterZ + Math.sin(ang) * shift,
+              GAME_CONSTANTS.ARENA_MIN_Z + 24,
+              GAME_CONSTANTS.ARENA_MAX_Z - 24
+            );
+            this.nextStormRadius = nextDef.targetRadius;
+          }
         } else {
           this.stormPhaseTimer = 0;
         }
@@ -3124,6 +3370,14 @@ export class WorkspaceRoyaleEngine {
     speedMult: number,
     fireRateMult: number
   ): void {
+    // Riding inside the Flying Google GBus (mouse-look orbits freely; Space/E jumps out!)
+    if (p.inBus) {
+      p.vel.set(0, 0, 0);
+      p.sprinting = false;
+      this.audio.setGliderWind(false, false);
+      return;
+    }
+
     // Sky / Glider Drop-In Controls (§3.2)
     if (p.skyDropping) {
       const fInput = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0);
@@ -3525,6 +3779,12 @@ export class WorkspaceRoyaleEngine {
     }
     const decision = b.cachedDecision;
     if (!decision) return;
+
+    // Bots waiting aboard the Flying Google GBus eject via updateGBus() at their staggered busDropProgress
+    if (b.inBus) {
+      b.vel.set(0, 0, 0);
+      return;
+    }
 
     // Sky Drop gliding for AI bots
     if (b.skyDropping) {
@@ -6654,6 +6914,17 @@ export class WorkspaceRoyaleEngine {
   }
 
   private syncCombatantVisuals(c: Combatant, dt: number): void {
+    if (c.inBus) {
+      if (c.hero.root.visible) c.hero.root.visible = false;
+      if (c.gliderMesh.visible) c.gliderMesh.visible = false;
+      c.hero.overheadGroup.visible = false;
+      c.hero.revealRing.visible = false;
+      c.prevYaw = c.yaw;
+      c.prevVelX = c.vel.x;
+      c.prevVelZ = c.vel.z;
+      return;
+    }
+
     const qCfg = QUALITY_PRESETS[this.qualityPreset];
     const revealedByPlayer = Boolean(this.player && this.player.revealedAllSec > 0);
     let isMidLod = false;
@@ -7183,6 +7454,7 @@ export class WorkspaceRoyaleEngine {
           isAds: false,
           sniperScope: false,
           skyDropping: target.skyDropping,
+          inBus: target.inBus,
           dead: false,
           raycastDist: (origin, dir, maxDist) => {
             const hit = this.physics.raycastWorld(origin, dir, maxDist);
@@ -7209,6 +7481,7 @@ export class WorkspaceRoyaleEngine {
       isAds: this.player.isAds,
       sniperScope: this.isPlayerSniperScoped(),
       skyDropping: this.player.skyDropping,
+      inBus: this.player.inBus,
       dead: !this.player.alive,
       raycastDist: (origin, dir, maxDist) => {
         const hit = this.physics.raycastWorld(origin, dir, maxDist);
@@ -7494,13 +7767,18 @@ export class WorkspaceRoyaleEngine {
       ),
       stormPhase: mode.stormEnabled ? phaseDef.phase : 0,
       stormStateLabel: mode.stormEnabled
-        ? this.stormMode === 'wait'
-          ? `Phase ${phaseDef.phase} Wait`
-          : `Phase ${phaseDef.phase} Shrinking`
+        ? phaseDef.isMoving
+          ? this.stormMode === 'wait'
+            ? `Moving Zone ${phaseDef.phase}`
+            : `Zone ${phaseDef.phase} Moving`
+          : this.stormMode === 'wait'
+            ? `Phase ${phaseDef.phase} Wait`
+            : `Phase ${phaseDef.phase} Shrinking`
         : 'FREE ROAM · NO STORM',
       stormTimer: mode.stormEnabled ? Math.max(0, Math.ceil(this.stormPhaseTimer)) : 0,
       inStorm,
       stormDps: mode.stormEnabled ? phaseDef.dps : 0,
+      stormIsMoving: mode.stormEnabled ? Boolean(phaseDef.isMoving) : false,
       zoneName: focusC && this.world ? this.world.getZoneName(focusC.pos.x, focusC.pos.z) : 'Googleplex Campus',
       headingRad: focusC ? focusC.yaw : 0, // Standard Three.js yaw (0 = North -Z, turning right decreases yaw)
       interactPrompt,
@@ -7510,6 +7788,15 @@ export class WorkspaceRoyaleEngine {
         sliding: p?.sliding ?? false,
         ridingGBike: Boolean(riddenBike),
         gbikeSpeedKmh: riddenBike ? Math.abs(riddenBike.speed) * 3.6 : 0,
+        inBus: p?.inBus ?? false,
+        canDropFromBus: Boolean(
+          p?.inBus &&
+            this.gbus &&
+            this.gbus.active &&
+            this.gbus.progress >= GAME_CONSTANTS.GBUS_DROP_UNLOCK_PROGRESS
+        ),
+        busProgress:
+          this.gbus && this.gbus.active ? THREE.MathUtils.clamp(this.gbus.progress, 0, 1) : 0,
         silencedSec: p?.silencedSec ?? 0,
         hastedSec: p?.hastedSec ?? 0,
         slowedSec: p?.slowedSec ?? 0,
@@ -7574,6 +7861,7 @@ export class WorkspaceRoyaleEngine {
         continue;
       }
       if (c.isPlayer) continue;
+      if (c.inBus) continue;
       const dist = p ? c.pos.distanceTo(p.pos) : 999;
       const recentlyFired = this.matchElapsed - c.lastShotAt < 2.2 && dist < 115;
       if (revealedAll || dist < 48 || recentlyFired) {
@@ -7626,6 +7914,9 @@ export class WorkspaceRoyaleEngine {
       name: ts.name,
     }));
 
+    const mode = GAME_MODES[this.activeGameMode] ?? GAME_MODES.battle_royale;
+    const phaseDef = STORM_PHASES[this.stormPhaseIndex] ?? STORM_PHASES[STORM_PHASES.length - 1];
+
     return {
       playerX: px,
       playerZ: pz,
@@ -7642,6 +7933,21 @@ export class WorkspaceRoyaleEngine {
       supplyDrops,
       gbikes,
       techStops,
+      gbus:
+        this.gbus && this.gbus.active
+          ? {
+              active: true,
+              x: this.gbus.x,
+              z: this.gbus.z,
+              yaw: this.gbus.yaw,
+              startX: this.gbus.startX,
+              startZ: this.gbus.startZ,
+              endX: this.gbus.endX,
+              endZ: this.gbus.endZ,
+              progress: THREE.MathUtils.clamp(this.gbus.progress, 0, 1),
+            }
+          : null,
+      stormMoving: mode.stormEnabled ? Boolean(phaseDef.isMoving) : false,
       landmarks: this.world?.landmarks ?? [],
       revealedAll,
       waypoint: this.waypoint ? { x: this.waypoint.x, z: this.waypoint.z } : null,
@@ -7684,6 +7990,34 @@ export class WorkspaceRoyaleEngine {
         }
       }
       return;
+    }
+
+    // Allow jumping from the Flying Google GBus via Space or E (even before pointer lock re-engages)
+    if (
+      !this.mapOpen &&
+      this.player &&
+      this.player.alive &&
+      this.player.inBus &&
+      !e.repeat &&
+      (e.code === 'Space' || e.code === 'KeyE')
+    ) {
+      const targetEl = e.target as HTMLElement | null;
+      const isInput =
+        targetEl instanceof HTMLInputElement ||
+        targetEl instanceof HTMLTextAreaElement ||
+        targetEl instanceof HTMLSelectElement;
+      if (!isInput) {
+        const canDrop = Boolean(
+          this.gbus &&
+            this.gbus.active &&
+            this.gbus.progress >= GAME_CONSTANTS.GBUS_DROP_UNLOCK_PROGRESS
+        );
+        if (canDrop) {
+          e.preventDefault();
+          this.ejectFromGBus(this.player);
+        }
+        return;
+      }
     }
 
     if (this.mapOpen || !this.pointerLocked) return;
@@ -7854,6 +8188,7 @@ export class WorkspaceRoyaleEngine {
     if (c.skyDropping) flags |= FLAG_SKYDROPPING;
     if (c.rewind.active) flags |= FLAG_REWINDING;
     if (c.channel !== null) flags |= FLAG_CHANNELING;
+    if (c.inBus) flags |= FLAG_IN_BUS;
     return flags;
   }
 
@@ -7969,6 +8304,7 @@ export class WorkspaceRoyaleEngine {
     // Unpack stance & action bitmask flags
     const wasSkyDropping = c.skyDropping;
     const wasReloading = c.isReloading;
+    const wasInBus = c.inBus;
     c.grounded = (t.flags & FLAG_GROUNDED) !== 0;
     c.crouching = (t.flags & FLAG_CROUCHING) !== 0;
     c.sprinting = (t.flags & FLAG_SPRINTING) !== 0;
@@ -7977,6 +8313,16 @@ export class WorkspaceRoyaleEngine {
     c.isReloading = (t.flags & FLAG_RELOADING) !== 0;
     c.skyDropping = (t.flags & FLAG_SKYDROPPING) !== 0;
     c.rewind.active = (t.flags & FLAG_REWINDING) !== 0;
+    c.inBus = (t.flags & FLAG_IN_BUS) !== 0;
+
+    if (c.inBus) {
+      c.hero.root.visible = false;
+      c.gliderMesh.visible = false;
+      return;
+    } else if (wasInBus && !c.inBus) {
+      c.hero.root.visible = true;
+      c.gliderMesh.visible = c.skyDropping;
+    }
 
     if (!c.grounded && !c.skyDropping) {
       c.airborneTime += dt;

@@ -42,7 +42,8 @@ export type PropAssetId =
   | 'glider'
   | 'loot_chest'
   | 'gbike_rideable'
-  | 'techstop_kiosk';
+  | 'techstop_kiosk'
+  | 'google_gbus';
 
 export type MapAssetKey =
   | 'terrain'
@@ -309,6 +310,9 @@ export interface StormPhaseDef {
   shrinkDuration: number;
   targetRadius: number;
   dps: number;
+  isMoving?: boolean;
+  moveShiftMin?: number;
+  moveShiftMax?: number;
 }
 
 export interface LoadingProgress {
@@ -333,6 +337,9 @@ export interface StatusEffectsState {
   sliding: boolean;
   ridingGBike?: boolean;
   gbikeSpeedKmh?: number;
+  inBus?: boolean;
+  canDropFromBus?: boolean;
+  busProgress?: number; // 0..1
   silencedSec: number;
   hastedSec: number;
   slowedSec: number;
@@ -443,6 +450,7 @@ export interface HudSnapshot {
   stormTimer: number;
   inStorm: boolean;
   stormDps: number;
+  stormIsMoving?: boolean;
   zoneName: string;
   headingRad: number;
   interactPrompt: string | null;
@@ -515,6 +523,18 @@ export interface MinimapTechStop {
   name: string;
 }
 
+export interface MinimapGBusState {
+  active: boolean;
+  x: number;
+  z: number;
+  yaw: number;
+  startX: number;
+  startZ: number;
+  endX: number;
+  endZ: number;
+  progress: number; // 0..1
+}
+
 export interface MinimapState {
   playerX: number;
   playerZ: number;
@@ -531,6 +551,8 @@ export interface MinimapState {
   supplyDrops: MinimapSupplyDrop[];
   gbikes?: MinimapGBike[];
   techStops?: MinimapTechStop[];
+  gbus?: MinimapGBusState | null;
+  stormMoving?: boolean;
   landmarks: LandmarkInfo[];
   revealedAll: boolean;
   waypoint?: MapWaypoint | null;

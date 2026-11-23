@@ -176,6 +176,7 @@ export const FLAG_RELOADING = 1 << 5;
 export const FLAG_SKYDROPPING = 1 << 6;
 export const FLAG_REWINDING = 1 << 7;
 export const FLAG_CHANNELING = 1 << 8;
+export const FLAG_IN_BUS = 1 << 9;
 
 // ---------------------------------------------------------------------------
 // Compact Real-Time Match Payloads

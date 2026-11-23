@@ -112,6 +112,14 @@ export interface TechStopVisual {
   holoIcon: THREE.Object3D | null;
 }
 
+export interface GoogleGBusVisual {
+  root: THREE.Group;
+  rotorL: THREE.Object3D | null;
+  rotorR: THREE.Object3D | null;
+  thrusterL: THREE.Object3D | null;
+  thrusterR: THREE.Object3D | null;
+}
+
 const GBIKE_LIVERY_PAIRS: readonly { frameHex: number; fenderHex: number }[] = [
   { frameHex: 0x4285f4, fenderHex: 0xfbbc04 }, // 0: Google Blue + Google Yellow
   { frameHex: 0xea4335, fenderHex: 0x4285f4 }, // 1: Google Red + Google Blue
@@ -408,6 +416,7 @@ export const PROP_ASSET_PATHS: Record<PropAssetId, string> = {
   loot_chest: '/assets/utilities/prop_loot_chest.glb',
   gbike_rideable: '/assets/map/prop_gbike_rideable.glb',
   techstop_kiosk: '/assets/map/prop_techstop_kiosk.glb',
+  google_gbus: '/assets/map/prop_google_gbus.glb',
 };
 
 export const MAP_ASSET_PATHS: Record<MapAssetKey, string> = {
@@ -575,7 +584,9 @@ export class AssetManager {
                 ? 'Prop · Rideable GBike'
                 : id === 'techstop_kiosk'
                   ? 'Prop · TechStop Kiosk'
-                  : 'Prop · Supply Drop',
+                  : id === 'google_gbus'
+                    ? 'Prop · Flying Google GBus'
+                    : 'Prop · Supply Drop',
       });
     }
     for (const [key, url] of Object.entries(MAP_ASSET_PATHS)) {
@@ -1959,6 +1970,70 @@ export class AssetManager {
     return {
       root,
       holoIcon,
+    };
+  }
+
+  /**
+   * Instantiates the flying winged Google GBus (`prop_google_gbus.glb`),
+   * capturing `GBus_RotorL`, `GBus_RotorR`, `GBus_ThrusterL`, and `GBus_ThrusterR`
+   * for live propeller spin and dual jet contrail emission.
+   */
+  public instantiateGoogleGBus(): GoogleGBusVisual {
+    const gltf = this.cache.get('prop:google_gbus');
+    const root = new THREE.Group();
+    root.name = 'GoogleGBus';
+
+    let rotorL: THREE.Object3D | null = null;
+    let rotorR: THREE.Object3D | null = null;
+    let thrusterL: THREE.Object3D | null = null;
+    let thrusterR: THREE.Object3D | null = null;
+
+    if (gltf) {
+      const cloned = gltf.scene.clone(true);
+      cloned.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          const mesh = obj as THREE.Mesh;
+          mesh.castShadow = false;
+          mesh.receiveShadow = false;
+        }
+      });
+      root.add(cloned);
+      rotorL = cloned.getObjectByName('GBus_RotorL') ?? null;
+      rotorR = cloned.getObjectByName('GBus_RotorR') ?? null;
+      thrusterL = cloned.getObjectByName('GBus_ThrusterL') ?? null;
+      thrusterR = cloned.getObjectByName('GBus_ThrusterR') ?? null;
+    } else {
+      // Minimal procedural fallback only if GLB failed to load
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(2.6, 3.2, 11.8),
+        new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 })
+      );
+      root.add(body);
+      const wing = new THREE.Mesh(
+        new THREE.BoxGeometry(13.4, 0.28, 2.2),
+        new THREE.MeshStandardMaterial({ color: 0x4285f4, roughness: 0.35 })
+      );
+      wing.position.set(0, 0.42, -0.2);
+      root.add(wing);
+
+      const tL = new THREE.Object3D();
+      tL.name = 'GBus_ThrusterL';
+      tL.position.set(-3.85, 0.42, 1.55);
+      root.add(tL);
+      const tR = new THREE.Object3D();
+      tR.name = 'GBus_ThrusterR';
+      tR.position.set(3.85, 0.42, 1.55);
+      root.add(tR);
+      thrusterL = tL;
+      thrusterR = tR;
+    }
+
+    return {
+      root,
+      rotorL,
+      rotorR,
+      thrusterL,
+      thrusterR,
     };
   }
 }

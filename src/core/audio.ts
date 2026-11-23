@@ -515,6 +515,33 @@ export class SoundEngine {
     this.playTone('triangle', 440, 440, 0.72, 0.18, 0.5);
   }
 
+  /** Cheerful double Google commuter bus air-horn chime when the GBus enters the campus. */
+  public playGBusHorn(): void {
+    const honk = (delay: number, duration: number, gainScale: number): void => {
+      // Warm major-third brassy dual air-horn chord (F4 + A4 + octave harmonic)
+      this.playTone('sawtooth', 342, 349.23, duration, 0.14 * gainScale, delay);
+      this.playTone('triangle', 432, 440.0, duration, 0.17 * gainScale, delay);
+      this.playTone('sine', 690, 698.46, duration * 0.9, 0.11 * gainScale, delay);
+      // Brief pneumatic air-valve burst on horn attack
+      this.playNoise('bandpass', 1800, 900, 1.6, 0.08, 0.09 * gainScale, delay);
+    };
+
+    honk(0, 0.24, 0.95);
+    honk(0.29, 0.44, 1.1);
+  }
+
+  /** Joyful ascending bus horn + crisp rushing-air leap whoosh when jumping out of the Google GBus. */
+  public playGBusJump(): void {
+    // Joyful ascending Google commuter chime/horn chirp (C5 -> E5 -> G5)
+    this.playTone('triangle', 523.25, 530, 0.12, 0.2, 0);
+    this.playTone('triangle', 659.25, 668, 0.14, 0.22, 0.065);
+    this.playTone('sine', 783.99, 804, 0.22, 0.22, 0.13);
+    // Crisp rushing-air leap whoosh + energetic exit punch
+    this.playNoise('bandpass', 520, 2600, 1.0, 0.44, 0.34, 0.02);
+    this.playNoise('highpass', 1800, 760, 1.4, 0.32, 0.18, 0.08);
+    this.playTone('sine', 165, 54, 0.18, 0.28, 0);
+  }
+
   public playSupplyDropOpen(): void {
     this.playNoise('bandpass', 1400, 420, 1.5, 0.22, 0.25, 0);
     this.playTone('triangle', 523.25, 659.25, 0.14, 0.24, 0.08);
