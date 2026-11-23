@@ -1,4 +1,4 @@
-name = "workspace-battle-royale-rt"
+name = "workspace-battle-royale"
 main = "src/index.ts"
 compatibility_date = "2026-01-01"
 workers_dev = true
